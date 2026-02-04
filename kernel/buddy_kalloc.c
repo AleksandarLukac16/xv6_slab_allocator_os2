@@ -87,7 +87,7 @@ uint64 find_fitting(uint16 order)
 {
 	while(tree[order].index_free == -1)
 	{
-		order++;
+		order++; // add break here if memory is full
 	}
 	return tree[order].index_free;
 }
