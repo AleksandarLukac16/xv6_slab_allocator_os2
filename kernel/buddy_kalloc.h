@@ -1,6 +1,6 @@
 
 
-#define NUM_OF_4KB_SIZE 16384/4 // each pair i need 2 bits
+#define NUM_OF_4KB_SIZE 16384 // first iteration full byte
 #define NUM_OF_8KB_SIZE NUM_OF_4KB_SIZE/2
 #define NUM_OF_16KB_SIZE NUM_OF_8KB_SIZE/2
 #define NUM_OF_32KB_SIZE NUM_OF_16KB_SIZE/2
@@ -17,3 +17,6 @@
 #define NUM_OF_64MB_SIZE NUM_OF_32MB_SIZE/2
 #define NUM_OF_128MB_SIZE 0
 #define BUDDY_TREE_LEVEL 14
+#define SLOT_EMPTY 0
+#define SLOT_BUDDY 1
+#define SLOT_FULL 2

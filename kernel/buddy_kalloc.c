@@ -47,6 +47,7 @@ struct arrayhead
 {
 	uint8* array;
 	uint64 size;
+	long index_free=0; // if that level is full index is -1
 }
 
 extern char end[];
@@ -61,23 +62,40 @@ struct {
     struct freeblock* freelist[];
 } kmem;
 
-int address_to_index(void *ptr)
+uint64 address_to_index(void *ptr , uint16 order)
+{
+	return (uint64)(adr>>(12 + order + 1)); // here i add 12 because order 0 is 4KB ...
+}
+void* index_to_address(uint64 index , uint16 order)
+{
+	return (void*)(index<<(12 + order + 1));
+}
+
+
+
+
+int split_block(uint64 index ,uint16 order)
+{
+
+}
+int merge_block(uint64 index ,uint16 order)
 {
 
 }
 
-int address_to_bit(int index , void *ptr)
+uint64 find_fitting(uint16 order)
 {
-
+	while(tree[order].index_free == -1)
+	{
+		order++;
+	}
+	return tree[order].index_free;
 }
 
-int split_block()
-int merge_block()
-
-//size is power of 2 of actual size
-void* buddy_kalloc(uint16 size)
+//order is power of 2 of actual size
+void* buddy_kalloc(uint16 order)
 {
-	if(size < 0 || size >BUDDY_TREE_LEVEL) return NULL;
+	if(order < 0 || order >BUDDY_TREE_LEVEL) return NULL;
 
 
 
