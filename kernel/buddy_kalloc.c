@@ -6,23 +6,27 @@
 #include "defs.h"
 #include "buddy_kalloc.h"
 
-uint8 buddy_bits_level0 [NUM_OF_4KB_SIZE],
-uint8 buddy_bits_level1 [NUM_OF_8KB_SIZE],
-uint8 buddy_bits_level2 [NUM_OF_16KB_SIZE],
-uint8 buddy_bits_level3 [NUM_OF_32KB_SIZE],
-uint8 buddy_bits_level4 [NUM_OF_64KB_SIZE],
-uint8 buddy_bits_level5 [NUM_OF_128KB_SIZE],
-uint8 buddy_bits_level6 [NUM_OF_256KB_SIZE],
-uint8 buddy_bits_level7 [NUM_OF_512KB_SIZE],
-uint8 buddy_bits_level8 [NUM_OF_1MB_SIZE],
-uint8 buddy_bits_level9 [NUM_OF_2MB_SIZE],
-uint8 buddy_bits_level10 [NUM_OF_4MB_SIZE],
-uint8 buddy_bits_level11 [NUM_OF_8MB_SIZE],
-uint8 buddy_bits_level12 [NUM_OF_16MB_SIZE],
-uint8 buddy_bits_level13 [NUM_OF_32MB_SIZE],
-uint8 buddy_bits_level14 [NUM_OF_64MB_SIZE]
+uint8 buddy_bits_level0 [NUM_OF_4KB_SIZE];
+uint8 buddy_bits_level1 [NUM_OF_8KB_SIZE];
+uint8 buddy_bits_level2 [NUM_OF_16KB_SIZE];
+uint8 buddy_bits_level3 [NUM_OF_32KB_SIZE];
+uint8 buddy_bits_level4 [NUM_OF_64KB_SIZE];
+uint8 buddy_bits_level5 [NUM_OF_128KB_SIZE];
+uint8 buddy_bits_level6 [NUM_OF_256KB_SIZE];
+uint8 buddy_bits_level7 [NUM_OF_512KB_SIZE];
+uint8 buddy_bits_level8 [NUM_OF_1MB_SIZE];
+uint8 buddy_bits_level9 [NUM_OF_2MB_SIZE];
+uint8 buddy_bits_level10 [NUM_OF_4MB_SIZE];
+uint8 buddy_bits_level11 [NUM_OF_8MB_SIZE];
+uint8 buddy_bits_level12 [NUM_OF_16MB_SIZE];
+uint8 buddy_bits_level13 [NUM_OF_32MB_SIZE];
+uint8 buddy_bits_level14 [NUM_OF_64MB_SIZE];
 
-
+struct arrayhead
+{
+	uint8* array;
+	uint64 size;
+} ;
 
 struct arrayhead tree[] =
 {
@@ -43,12 +47,7 @@ struct arrayhead tree[] =
     { buddy_bits_level14, NUM_OF_64MB_SIZE }
 };
 
-struct arrayhead
-{
-	uint8* array;
-	uint64 size;
-	long index_free=0; // if that level is full index is -1
-}
+
 
 extern char end[];
 
@@ -62,11 +61,11 @@ struct {
     struct freeblock* freelist[];
 } kmem;
 
-uint64 address_to_index(void *ptr , uint16 order)
+uint64 address_to_index(void *adr , uint16 order)
 {
-	return (uint64)(adr>>(12 + order + 1)); // here i add 12 because order 0 is 4KB ...
+	return ((uint64)adr>>(12 + order + 1)); // here i add 12 because order 0 is 4KB ...
 }
-void* index_to_address(uint64 index , uint16 order)
+void* index_to_address(long index , uint16 order)
 {
 	return (void*)(index<<(12 + order + 1));
 }
@@ -83,19 +82,43 @@ int merge_block(uint64 index ,uint16 order)
 
 }
 
-uint64 find_fitting(uint16 order)
+void update_downstairs(uint16 order,void *adr)
 {
-	while(tree[order].index_free == -1)
+	uint16 to_update_order = order-1;
+	uint64 power_of_iter = 0;
+	while(to_update_order > 0)
 	{
-		order++; // add break here if memory is full
+		long to_update = address_to_index(adr,to_update_order); // index is always lower
+		long margin = to_update;
+		for(; to_update < margin+2^power_of_iter ; to_update++) // turn this to left shift
+		{
+			tree[to_update_order].array[to_update] = SLOT_FULL;
+		}
+		power_of_iter ++;
+		to_update_order --;
+
 	}
-	return tree[order].index_free;
 }
 
 //order is power of 2 of actual size
 void* buddy_kalloc(uint16 order)
 {
-	if(order < 0 || order >BUDDY_TREE_LEVEL) return NULL;
+	if(order < 0 || order >BUDDY_TREE_LEVEL) return 0;
+
+	for (long i = 0; i< tree[order].size; i++)
+	{
+		if(tree[order].array[i]==SLOT_BUDDY)
+		{
+		 	// here i need to go in level down(if not 4kb and update)
+			void* adr  = index_to_address(i,order);
+			tree[order].array[i]=SLOT_FULL;
+			update_downstairs(order,adr);
+		}
+		if(tree[order].array[i]==SLOT_EMPTY)
+		{
+
+		}
+	}
 
 
 

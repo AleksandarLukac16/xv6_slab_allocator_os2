@@ -18,5 +18,5 @@
 #define NUM_OF_128MB_SIZE 0
 #define BUDDY_TREE_LEVEL 14
 #define SLOT_EMPTY 0
-#define SLOT_BUDDY 1
-#define SLOT_FULL 2
+#define SLOT_BUDDY 2
+#define SLOT_FULL 3
