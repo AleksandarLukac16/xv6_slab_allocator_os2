@@ -82,19 +82,29 @@ uint8 is_buddy(uint16 to_update_order,long to_update) {
 	return tree[to_update_order].array[to_update] == SLOT_BUDDY;
 }
 
+void alloc_update(uint16 to_update_order,long to_update) {
+	tree[to_update_order].array[to_update] = (tree[to_update_order].array[to_update]<<1)|1;
+}
 
-void update_downstairs(uint16 order,void *adr,uint8 state,uint8 (*check)(uint16,long))
+void free_update(uint16 to_update_order,long to_update) {
+	tree[to_update_order].array[to_update] >>= 1 ;
+}
+
+
+
+void update_downstairs(uint16 order,void *adr,void(*update)(uint16,long))
 {
 	uint16 to_update_order = order-1;
 	uint64 power_of_iter = 0;
 	while(to_update_order > 0)
 	{
 		long to_update = address_to_index(adr,to_update_order); // index is always lower
+
 		long margin = to_update;
 		for(; to_update < margin+(1<<power_of_iter) ; to_update++)
 		{
-			if (check(to_update_order,to_update))
-				tree[to_update_order].array[to_update] = state;
+			update(to_update_order,to_update);
+			update(to_update_order,to_update);
 		}
 		power_of_iter ++;
 		to_update_order --;
@@ -102,13 +112,13 @@ void update_downstairs(uint16 order,void *adr,uint8 state,uint8 (*check)(uint16,
 	}
 }
 
-void update_upstairs(uint16 order,void *adr,uint8 state,uint8 (*f)(uint16,long))
+void update_upstairs(uint16 order,void *adr,void(*update)(uint16,long))
 {
 	uint16 to_update_order = order+1;
 	while(to_update_order < BUDDY_TREE_LEVEL)
 	{
 		long to_update = address_to_index(adr,to_update_order);
-		tree[to_update_order].array[to_update] = state;
+		update(to_update_order,to_update);
 		to_update_order++;
 	}
 }
@@ -125,14 +135,14 @@ void* buddy_kalloc(uint16 order)
 		 	// here i need to go in level down(if not 4kb and update)
 			void* adr  = index_to_address(i,order);
 			tree[order].array[i]=SLOT_FULL;
-			update_downstairs(order,adr,SLOT_FULL,is_empty);
+			update_downstairs(order,adr,alloc_update);
 			return adr;
 		}else if(tree[order].array[i]==SLOT_EMPTY)
 		{
 			void* adr = index_to_address(i,order);
 			tree[order].array[i]=SLOT_BUDDY;
-			update_downstairs(order,adr,SLOT_FULL,is_empty);
-			update_upstairs(order,adr,SLOT_BUDDY,is_empty);
+			update_downstairs(order,adr,alloc_update);
+			update_upstairs(order,adr,alloc_update);
 			return adr;
 		}
 	}
@@ -149,15 +159,13 @@ int buddy_kfree(void *ptr , uint16 order)
 	if (tree[order].array[to_free] == SLOT_BUDDY)
 	{
 		tree[order].array[to_free] = SLOT_EMPTY;
-		update_downstairs(order,ptr,SLOT_EMPTY,is_full);
-		update_upstairs(order,ptr,SLOT_BUDDY,is_full); // need to make difference when i free upwards when is ,full
-															// and when is buddy
-
+		update_downstairs(order,ptr,free_update);
+		update_upstairs(order,ptr,free_update);
 
 	}else if (tree[order].array[to_free] == SLOT_FULL)
 	{
 		tree[order].array[to_free] = SLOT_BUDDY;
-		update_downstairs(order,ptr,SLOT_EMPTY,is_full);
+		update_downstairs(order,ptr,free_update);
 	}
 
 	return 1;
