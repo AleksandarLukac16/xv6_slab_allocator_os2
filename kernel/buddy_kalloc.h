@@ -1,5 +1,6 @@
 #define BUDDY_TREE_LEVEL 14
 #define SLOT_EMPTY 0
-#define SLOT_BUDDY 1
-#define SLOT_FULL 2
-#define SLOT_SPLIT 3
+#define RIGHT_USED 1
+#define LEFT_USED 2
+#define SLOT_FULL 3
+
