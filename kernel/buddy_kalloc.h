@@ -3,4 +3,4 @@
 #define RIGHT_USED 1
 #define LEFT_USED 2
 #define SLOT_FULL 3
-
+#define MEM_SIZE 128*1024*1024
