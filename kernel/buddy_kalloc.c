@@ -48,7 +48,6 @@ static inline void set_state(long vindex, uint8 state) {
     tree[rindex] |=  (state & 0x3)<<shift;
 }
 
-
 static inline long get_level(long vindex) {
     return 63 - __builtin_clzll(vindex); // this function deletes leading zeros
 }
@@ -110,19 +109,46 @@ static inline void update_upstairs_free(long vindex) {
     }
 }
 
-static inline uint16 locate_free_block(long* vindex,uint16 order) { // add check for half used blocks
+static inline uint8 check_side(long *vindex ,uint8 state , long (*moover_succ)(long),long (*moover_fail)(long)) {
+    if (get_state(*vindex)==state) {
+        long temp = moover_succ(*vindex);
+        if (get_state(temp)!=SLOT_FULL) {
+            *vindex = temp;
+        }else {
+            *vindex = moover_fail(*vindex);
+        }
+        return 1;
+    }
+    return 0;
+}
+static inline uint16 locate_free_block(long* vindex,uint16 order) { // rewrite to use "Teleportation"
+
     uint16 local_order = 0;
     long virtual_index = *vindex;
-    while (local_order < order) {
-        if (get_state(virtual_index)==LEFT_USED) {
-            virtual_index= go_right(virtual_index);
-        }else if (get_state(virtual_index)==RIGHT_USED|| get_state(virtual_index)==SLOT_EMPTY) {
-            virtual_index= go_left(virtual_index);
+    uint8 mem_used = 0;
+    while (local_order < order && mem_used ==0) {
+        mem_used = 0;
+        if (check_side(&virtual_index,LEFT_USED,go_left,go_right)) {
+            local_order++;
+            continue;
         }
-        local_order++;
+        if (check_side(&virtual_index,RIGHT_USED,go_right,go_left)) {
+            local_order++;
+            continue;
+        }
+        if (get_state(virtual_index)==SLOT_EMPTY) {
+            virtual_index = go_left(virtual_index);
+            local_order++;
+            continue;
+        }
+        mem_used = 1;
     }
-    *vindex=virtual_index;
-    return local_order;
+    if (local_order == order) {
+        *vindex=virtual_index;
+        return local_order;
+    }
+    return 0;
+
 }
 
 void * buddy_kalloc(uint16 order) {
