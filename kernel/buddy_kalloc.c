@@ -1,15 +1,8 @@
-#include "types.h"
-#include "param.h"
-#include "memlayout.h"
-#include "spinlock.h"
-#include "riscv.h"
-#include "defs.h"
 #include "buddy_kalloc.h"
-
+#include "memlayout.h"
 uint8 tree[2<<(BUDDY_TREE_LEVEL)];
 
 extern char end[]; // linker will provide this with last mem location of kernel code
-
 
 static inline long rindex_to_vindex(long rindex) {
     return rindex<<2;
@@ -66,26 +59,29 @@ static inline long get_vindex(void* adr , uint16 level) {
     return (1ULL << level) + (rel_addr / block_size);
 }
 
-static inline uint8 is_brother_empty(long vindex,long (*mover)(long)) {
-    if (get_state(mover(vindex))==SLOT_EMPTY)return 1;
+static inline uint8 is_brother_full(long vindex,long (*mover)(long)) {
+    if (get_state(mover(vindex))==SLOT_FULL)return 1;
     return 0;
 }
 
 
-static inline void update_upstairs_alloc(long vindex) {
-    while (vindex !=1) { //maybe make this go up to 3 and 2 and never reach the root
+static inline void update_upstairs_alloc(long vindex) { // make update just update first parent no after
+    while (vindex !=1) {
+        uint8 state = get_state(vindex);
         if (is_left_son(vindex)) {
             vindex = go_up(vindex);
-            if (is_brother_empty(vindex,go_right))
-                set_state(vindex,LEFT_USED);
-            else
+            if (is_brother_full(vindex,go_right) && state ==SLOT_FULL)
                 set_state(vindex,SLOT_FULL);
+            else
+                set_state(vindex,LEFT_USED);
+
         }else {
             vindex = go_up(vindex);
-            if (is_brother_empty(vindex,go_left))
-                set_state(vindex,RIGHT_USED);
-            else
+            if (is_brother_full(vindex,go_left) && state ==SLOT_FULL)
                 set_state(vindex,SLOT_FULL);
+            else
+                set_state(vindex,RIGHT_USED);
+
         }
     }
 }
@@ -132,16 +128,17 @@ static inline uint16 locate_free_block(long* vindex,uint16 level) {
     uint8 mem_used = 0;
      while (curr_level < level && mem_used ==0) {
          mem_used = 0;
+
+         if (get_state(virtual_index)==SLOT_EMPTY) {
+             virtual_index = go_left(virtual_index);
+             curr_level++;
+             continue;
+         }
          if (check_side(&virtual_index,LEFT_USED,go_left,go_right,curr_level,level)) {
              curr_level++;
              continue;
          }
          if (check_side(&virtual_index,RIGHT_USED,go_right,go_left,curr_level,level)) {
-             curr_level++;
-             continue;
-         }
-         if (get_state(virtual_index)==SLOT_EMPTY) {
-             virtual_index = go_left(virtual_index);
              curr_level++;
              continue;
          }
@@ -177,7 +174,7 @@ void * buddy_kalloc(uint16 order) {
 int buddy_kfree(void* adr , uint16 order) {
 
     uint64 addr = (uint64)adr;
-    if (order>BUDDY_TREE_LEVEL || addr > PHYSTOP) return 0;
+    if (order>BUDDY_TREE_LEVEL || addr > PHYSTOP ||(char*)addr<end) return 0;
     uint16 level = BUDDY_TREE_LEVEL - order;
 
     long virtual_index = get_vindex(adr,level);
@@ -185,4 +182,8 @@ int buddy_kfree(void* adr , uint16 order) {
     update_upstairs_free(virtual_index);
     return 1;
 
+}
+
+int binit() {
+    //here i save kernel code from getting runned over
 }
