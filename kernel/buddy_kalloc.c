@@ -8,7 +8,7 @@
 
 uint8 tree[2<<(BUDDY_TREE_LEVEL)];
 
-extern char end[];
+extern char end[]; // linker will provide this with last mem location of kernel code
 
 struct {
      struct freeblock* next;
@@ -69,20 +69,32 @@ static inline void *get_adr(long vindex) {
     return (void*)(KERNBASE + (offset * block_size));
 }
 
-static inline long get_vindex(void* adr , uint16 order) {
+static inline long get_vindex(void* adr , uint16 level) {
     uint64 rel_addr = (uint64)adr - KERNBASE;
-    uint64 block_size = MEM_SIZE >> order;
-    return (1ULL << order) + (rel_addr / block_size);
+    uint64 block_size = MEM_SIZE >> level;
+    return (1ULL << level) + (rel_addr / block_size);
 }
+
+static inline uint8 is_brother_empty(long vindex,long (*mover)(long)) {
+    if (get_state(mover(vindex))==SLOT_EMPTY)return 1;
+    return 0;
+}
+
 
 static inline void update_upstairs_alloc(long vindex) {
     while (vindex !=1) {
         if (is_left_son(vindex)) {
             vindex = go_up(vindex);
-            set_state(vindex,LEFT_USED);
+            if (is_brother_empty(vindex,go_right))
+                set_state(vindex,LEFT_USED);
+            else
+                set_state(vindex,SLOT_FULL);
         }else {
             vindex = go_up(vindex);
-            set_state(vindex,RIGHT_USED);
+            if (is_brother_empty(vindex,go_left))
+                set_state(vindex,RIGHT_USED);
+            else
+                set_state(vindex,SLOT_FULL);
         }
     }
 }
@@ -109,54 +121,59 @@ static inline void update_upstairs_free(long vindex) {
     }
 }
 
-static inline uint8 check_side(long *vindex ,uint8 state , long (*moover_succ)(long),long (*moover_fail)(long)) {
+static inline uint8 check_side(long *vindex ,uint8 state , long (*mover_succ)(long),
+    long (*mover_fail)(long),uint16 curr_level,uint16 level) {
     if (get_state(*vindex)==state) {
-        long temp = moover_succ(*vindex);
-        if (get_state(temp)!=SLOT_FULL) {
+        long temp = mover_succ(*vindex);
+        if (get_state(temp)!=SLOT_FULL && curr_level+1<level) {
             *vindex = temp;
         }else {
-            *vindex = moover_fail(*vindex);
+            *vindex = mover_fail(*vindex);
         }
         return 1;
     }
     return 0;
 }
-static inline uint16 locate_free_block(long* vindex,uint16 order) { // rewrite to use "Teleportation"
+static inline uint16 locate_free_block(long* vindex,uint16 level) {
 
-    uint16 local_order = 0;
+    uint16 curr_level = 0;
     long virtual_index = *vindex;
     uint8 mem_used = 0;
-    while (local_order < order && mem_used ==0) {
-        mem_used = 0;
-        if (check_side(&virtual_index,LEFT_USED,go_left,go_right)) {
-            local_order++;
-            continue;
-        }
-        if (check_side(&virtual_index,RIGHT_USED,go_right,go_left)) {
-            local_order++;
-            continue;
-        }
-        if (get_state(virtual_index)==SLOT_EMPTY) {
-            virtual_index = go_left(virtual_index);
-            local_order++;
-            continue;
-        }
-        mem_used = 1;
-    }
-    if (local_order == order) {
+     while (curr_level < level && mem_used ==0) {
+         mem_used = 0;
+         if (check_side(&virtual_index,LEFT_USED,go_left,go_right,curr_level,level)) {
+             curr_level++;
+             continue;
+         }
+         if (check_side(&virtual_index,RIGHT_USED,go_right,go_left,curr_level,level)) {
+             curr_level++;
+             continue;
+         }
+         if (get_state(virtual_index)==SLOT_EMPTY) {
+             virtual_index = go_left(virtual_index);
+             curr_level++;
+             continue;
+         }
+         mem_used = 1;
+     }
+    if (curr_level == level) {
         *vindex=virtual_index;
-        return local_order;
+        return curr_level;
     }
     return 0;
 
 }
 
+
+
 void * buddy_kalloc(uint16 order) {
     if (order>BUDDY_TREE_LEVEL) return 0;
 
+    uint16 level = BUDDY_TREE_LEVEL - order;
+
     long virtual_index = 1;
-    uint16 local_order = locate_free_block(&virtual_index,order);
-    if (local_order==0)return 0;
+    uint16 local_level = locate_free_block(&virtual_index,level);
+    if (local_level==0)return 0;
     if (get_state(virtual_index)==SLOT_EMPTY) {
         void* adr = get_adr(virtual_index);
         set_state(virtual_index,SLOT_FULL);
@@ -166,11 +183,13 @@ void * buddy_kalloc(uint16 order) {
     return 0;
 }
 
-int buddy_kfree(void * adr , uint16 order) {
+int buddy_kfree(void* adr , uint16 order) {
 
-    if (order>BUDDY_TREE_LEVEL || (uint64)adr > PHYSTOP) return 0;
+    uint64 addr = (uint64)adr;
+    if (order>BUDDY_TREE_LEVEL || addr > PHYSTOP || (char*)addr < end) return 0;
+    uint16 level = BUDDY_TREE_LEVEL - order;
 
-    long virtual_index = get_vindex(adr,order);
+    long virtual_index = get_vindex(adr,level);
     set_state(virtual_index,SLOT_EMPTY);
     update_upstairs_free(virtual_index);
     return 1;
