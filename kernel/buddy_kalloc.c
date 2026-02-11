@@ -10,15 +10,6 @@ uint8 tree[2<<(BUDDY_TREE_LEVEL)];
 
 extern char end[]; // linker will provide this with last mem location of kernel code
 
-struct {
-     struct freeblock* next;
-}freeblock ;
-
-
-struct {
-    struct spinlock lock;
-    struct freeblock* freelist[];
-} kmem;
 
 static inline long rindex_to_vindex(long rindex) {
     return rindex<<2;
@@ -82,7 +73,7 @@ static inline uint8 is_brother_empty(long vindex,long (*mover)(long)) {
 
 
 static inline void update_upstairs_alloc(long vindex) {
-    while (vindex !=1) {
+    while (vindex !=1) { //maybe make this go up to 3 and 2 and never reach the root
         if (is_left_son(vindex)) {
             vindex = go_up(vindex);
             if (is_brother_empty(vindex,go_right))
@@ -186,7 +177,7 @@ void * buddy_kalloc(uint16 order) {
 int buddy_kfree(void* adr , uint16 order) {
 
     uint64 addr = (uint64)adr;
-    if (order>BUDDY_TREE_LEVEL || addr > PHYSTOP || (char*)addr < end) return 0;
+    if (order>BUDDY_TREE_LEVEL || addr > PHYSTOP) return 0;
     uint16 level = BUDDY_TREE_LEVEL - order;
 
     long virtual_index = get_vindex(adr,level);
