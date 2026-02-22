@@ -1,6 +1,8 @@
 #include "types.h"
 #define BUDDY_TREE_LEVEL 14
-
+#define SLOT_EMPTY 0
+#define SLOT_SPLIT 1
+#define SLOT_FULL 3
 #define MEM_SIZE 128*1024*1024
 
 

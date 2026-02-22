@@ -1,2 +1,239 @@
-//start from schrach
+#include "buddy_kalloc.h"
+#include "memlayout.h"
+uint8 tree[2<<(BUDDY_TREE_LEVEL)];
 
+struct buddy_stack {
+    long vindex_stack[BUDDY_TREE_LEVEL];
+    int top;
+
+    uint8 (*empty)(struct buddy_stack *stack);
+    uint8 (*push)(struct buddy_stack *stack,long vindex);
+    uint8 (*pop)(struct buddy_stack *stack,long* vindex);
+};
+
+uint8 empty(struct buddy_stack *stack) {
+    return stack->top == 0;
+}
+
+
+uint8 push(struct buddy_stack *stack,long vindex) {
+    if (stack->top == BUDDY_TREE_LEVEL) return 0;
+    stack->vindex_stack[stack->top] = vindex;
+    stack->top++;
+    return 1;
+}
+uint8 pop(struct buddy_stack *stack,long* vindex) {
+    if (stack->top == 0) return 0;
+    stack->top--;
+    *vindex = stack->vindex_stack[stack->top];
+    return 1;
+}
+
+void init_buddy_stack(struct buddy_stack *stack) {
+    for (int i=0;i<BUDDY_TREE_LEVEL;i++) {
+        stack->vindex_stack[i]=0;
+    }
+    stack->top=0;
+    stack->push=push;
+    stack->pop=pop;
+    stack->empty=empty;
+}
+
+
+
+
+extern char end[]; // linker will provide this with last mem location of kernel code
+
+static inline long rindex_to_vindex(long rindex) {
+    return rindex<<2;
+}
+
+static inline long vindex_to_rindex(long vindex) {
+    return vindex>>2;
+}
+
+static inline long go_left(long vindex) {
+    return vindex<<1;
+}
+static inline long go_right(long vindex) {
+    return (vindex<<1)|1;
+}
+static inline uint8 get_state(long vindex) {
+    long rindex = vindex_to_rindex(vindex);
+    uint8 shift = (vindex%4) << 1;
+    uint8 state  = tree[rindex];
+    return (state >>shift) & 0x3;
+}
+
+static inline void set_state(long vindex, uint8 state) {
+    long rindex = vindex_to_rindex(vindex);
+    uint8 shift = (vindex%4) << 1;
+    tree[rindex] &= ~(0x3<<shift);
+    tree[rindex] |=  (state & 0x3)<<shift;
+}
+
+static inline long get_level(long vindex) {
+    return 63 - __builtin_clzll(vindex); // this function deletes leading zeros
+}
+
+static inline uint8 is_left_son(long vindex) {
+    return vindex%2 == 0 ? 1:0;
+}
+
+static inline long go_up(long vindex) {
+    return vindex>>1;
+}
+
+static inline void *get_adr(long vindex) {
+    if (vindex == 0) return 0;
+    long level = get_level(vindex);
+    long mask = 1ULL << level;
+    long offset = vindex ^ mask;  // removing leading 1 , used as delimiter
+    uint64 block_size = MEM_SIZE >> level; // calculating size of block
+    return (void*)(KERNBASE + (offset * block_size));
+}
+
+static inline long get_vindex(void* adr , uint16 level) {
+    uint64 rel_addr = (uint64)adr - KERNBASE;
+    uint64 block_size = MEM_SIZE >> level;
+    return (1ULL << level) + (rel_addr / block_size);
+}
+
+static inline uint8 is_brother_full(long vindex,long (*mover)(long)) {
+    if (get_state(mover(vindex))==SLOT_FULL)return 1;
+    return 0;
+}
+
+
+static inline void update_upstairs_alloc(long vindex) { // make update just update first parent no after
+    while (vindex !=1) {
+        long (*mover)(long) ;
+        uint8 state = get_state(vindex);
+        if (is_left_son(vindex))
+            mover = go_right;
+        else mover = go_left;
+        vindex = go_up(vindex);
+        if (is_brother_full(vindex,mover) && state ==SLOT_FULL)
+            set_state(vindex,SLOT_FULL);
+        else
+            set_state(vindex,SLOT_SPLIT);
+
+    }
+}
+
+static inline void update_upstairs_free(long vindex) {
+    while (vindex !=1) {
+        //need to fix
+
+    }
+}
+static inline uint8 check_son(long *vindex ,uint8 state ,uint16 curr_level,long (*mover)(long))
+{
+    if (curr_level+1>BUDDY_TREE_LEVEL) {
+        return 0;
+    }
+    return get_state(mover(*vindex))==state;
+}
+
+
+static inline uint16 locate_free_block(long* vindex,uint16 level) {
+    struct buddy_stack stack;
+    init_buddy_stack(&stack);
+
+    uint16 curr_level = 0;
+    long virtual_index = *vindex;
+    uint8 mem_used = 0;
+    uint8 found = 0;
+
+    while (1) {
+        while (curr_level<=level) {
+            uint8 state = get_state(virtual_index);
+            if (state == SLOT_FULL) {
+                break;  // backtrack
+            }
+            if (curr_level == level && state == SLOT_EMPTY) {
+                found = 1;
+                break;
+            }
+
+            if (state == SLOT_EMPTY) {
+                virtual_index = go_left(virtual_index);
+                curr_level++;
+            }else if (state == SLOT_SPLIT) {
+                uint8 ls = get_state(go_left(virtual_index));
+                uint8 rs = get_state(go_right(virtual_index));
+
+                if (ls == SLOT_SPLIT && rs == SLOT_SPLIT) {
+                    // both risky — push and go left
+                    if (!stack.push(&stack, virtual_index)) return 0;
+                    virtual_index = go_left(virtual_index);
+                } else if (ls == SLOT_EMPTY) {
+                    // prefer empty side
+                    virtual_index = go_left(virtual_index);
+                } else if (rs == SLOT_EMPTY) {
+                    virtual_index = go_right(virtual_index);
+                } else if (ls == SLOT_FULL) {
+                    // only right is viable
+                    virtual_index = go_right(virtual_index);
+                } else if (rs == SLOT_FULL) {
+                    // only left is viable
+                    virtual_index = go_left(virtual_index);
+                } else if (ls == SLOT_SPLIT) {
+                    // right is EMPTY (caught above), so left SPLIT right non-FULL
+                    // shouldn't reach here, but go right for empty preference
+                    virtual_index = go_right(virtual_index);
+                } else {
+                    virtual_index = go_left(virtual_index);
+                }
+                curr_level++;
+            }else break;
+        }
+        if (found)break;
+        if (stack.empty(&stack)) break;
+        stack.pop(&stack, &virtual_index);
+        virtual_index = go_right(virtual_index);
+        curr_level = get_level(virtual_index);
+    }
+    if (curr_level == level) {
+        *vindex=virtual_index;
+        return curr_level;
+    }
+    return 0;
+
+}
+
+
+
+void * buddy_kalloc(uint16 order) {
+    if (order>BUDDY_TREE_LEVEL) return 0;
+
+    uint16 level = BUDDY_TREE_LEVEL - order;
+
+    long virtual_index = 1;
+    uint16 local_level = locate_free_block(&virtual_index,level);
+    if (local_level==0)return 0;
+    if (get_state(virtual_index)==SLOT_EMPTY) {
+        void* adr = get_adr(virtual_index);
+        set_state(virtual_index,SLOT_FULL);
+        update_upstairs_alloc(virtual_index);
+        return adr;
+    }
+    return 0;
+}
+
+int buddy_kfree(void* adr , uint16 order) {
+
+    uint64 addr = (uint64)adr;
+    if (order>BUDDY_TREE_LEVEL || addr > PHYSTOP ||(char*)addr<end) return 0;
+    uint16 level = BUDDY_TREE_LEVEL - order;
+
+    long virtual_index = get_vindex(adr,level);
+    set_state(virtual_index,SLOT_EMPTY);
+    update_upstairs_free(virtual_index);
+    return 1;
+
+}
+
+int binit() {
+    //here i save kernel code from getting runned over
+}
