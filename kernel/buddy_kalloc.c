@@ -1,6 +1,6 @@
 #include "buddy_kalloc.h"
 #include "memlayout.h"
-uint8 tree[2<<(BUDDY_TREE_LEVEL)];
+uint8 tree[(2<<BUDDY_TREE_LEVEL)/4];
 
 struct buddy_stack {
     long vindex_stack[BUDDY_TREE_LEVEL];
@@ -39,7 +39,7 @@ void init_buddy_stack(struct buddy_stack *stack) {
     stack->empty=empty;
 }
 
-
+// here i need lock , to asure no more than one cpu is touching buddy_allocator
 
 
 extern char end[]; // linker will provide this with last mem location of kernel code
@@ -103,9 +103,17 @@ static inline uint8 is_brother_full(long vindex,long (*mover)(long)) {
     if (get_state(mover(vindex))==SLOT_FULL)return 1;
     return 0;
 }
+static inline uint8 is_brother_split(long vindex,long(*mover)(long)) {
+    if (get_state(mover(vindex))==SLOT_SPLIT)return 1;
+    return 0;
+}
 
+static inline uint8 is_brother_empty(long vindex,long(*mover)(long)) {
+    if (get_state(mover(vindex))==SLOT_EMPTY)return 1;
+    return 0;
+}
 
-static inline void update_upstairs_alloc(long vindex) { // make update just update first parent no after
+static inline void update_upstairs_alloc(long vindex) {
     while (vindex !=1) {
         long (*mover)(long) ;
         uint8 state = get_state(vindex);
@@ -123,18 +131,21 @@ static inline void update_upstairs_alloc(long vindex) { // make update just upda
 
 static inline void update_upstairs_free(long vindex) {
     while (vindex !=1) {
-        //need to fix
+        long (*mover)(long);
+        if (is_left_son(vindex))mover = go_right;
+        else mover = go_left;
+        vindex = go_up(vindex);
+        uint8 state = get_state(vindex);
+        if (state == SLOT_FULL) {
+            set_state(vindex,SLOT_SPLIT);
+        }else if (state == SLOT_SPLIT) {
+            if (is_brother_empty(vindex,mover)) {
+                set_state(vindex,SLOT_EMPTY);
+            }else return;
 
+        }
     }
 }
-static inline uint8 check_son(long *vindex ,uint8 state ,uint16 curr_level,long (*mover)(long))
-{
-    if (curr_level+1>BUDDY_TREE_LEVEL) {
-        return 0;
-    }
-    return get_state(mover(*vindex))==state;
-}
-
 
 static inline uint16 locate_free_block(long* vindex,uint16 level) {
     struct buddy_stack stack;
@@ -142,7 +153,6 @@ static inline uint16 locate_free_block(long* vindex,uint16 level) {
 
     uint16 curr_level = 0;
     long virtual_index = *vindex;
-    uint8 mem_used = 0;
     uint8 found = 0;
 
     while (1) {
@@ -162,25 +172,22 @@ static inline uint16 locate_free_block(long* vindex,uint16 level) {
             }else if (state == SLOT_SPLIT) {
                 uint8 ls = get_state(go_left(virtual_index));
                 uint8 rs = get_state(go_right(virtual_index));
-
+                //need to update this
                 if (ls == SLOT_SPLIT && rs == SLOT_SPLIT) {
-                    // both risky — push and go left
                     if (!stack.push(&stack, virtual_index)) return 0;
                     virtual_index = go_left(virtual_index);
                 } else if (ls == SLOT_EMPTY) {
-                    // prefer empty side
                     virtual_index = go_left(virtual_index);
                 } else if (rs == SLOT_EMPTY) {
                     virtual_index = go_right(virtual_index);
                 } else if (ls == SLOT_FULL) {
-                    // only right is viable
+
                     virtual_index = go_right(virtual_index);
                 } else if (rs == SLOT_FULL) {
-                    // only left is viable
+
                     virtual_index = go_left(virtual_index);
                 } else if (ls == SLOT_SPLIT) {
-                    // right is EMPTY (caught above), so left SPLIT right non-FULL
-                    // shouldn't reach here, but go right for empty preference
+
                     virtual_index = go_right(virtual_index);
                 } else {
                     virtual_index = go_left(virtual_index);
@@ -228,7 +235,10 @@ int buddy_kfree(void* adr , uint16 order) {
     uint16 level = BUDDY_TREE_LEVEL - order;
 
     long virtual_index = get_vindex(adr,level);
+    // see if freeing is valid
+    if (get_state(virtual_index)!=SLOT_FULL) return 0;
     set_state(virtual_index,SLOT_EMPTY);
+    //update all nodes in tree after this node is freed
     update_upstairs_free(virtual_index);
     return 1;
 
