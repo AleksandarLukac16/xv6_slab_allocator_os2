@@ -1,14 +1,19 @@
 #include "buddy_kalloc.h"
+#include "defs.h"
 #include "memlayout.h"
-uint8 tree[(2<<BUDDY_TREE_LEVEL)/4];
+#include "riscv.h"
+#include "spinlock.h"
+
+
+struct{
+    struct spinlock buddy_lock;
+    uint8 tree[TREE_SIZE];
+} mem_tree;
+
 
 struct buddy_stack {
     long vindex_stack[BUDDY_TREE_LEVEL];
     int top;
-
-    uint8 (*empty)(struct buddy_stack *stack);
-    uint8 (*push)(struct buddy_stack *stack,long vindex);
-    uint8 (*pop)(struct buddy_stack *stack,long* vindex);
 };
 
 uint8 empty(struct buddy_stack *stack) {
@@ -34,19 +39,13 @@ void init_buddy_stack(struct buddy_stack *stack) {
         stack->vindex_stack[i]=0;
     }
     stack->top=0;
-    stack->push=push;
-    stack->pop=pop;
-    stack->empty=empty;
 }
-
-// here i need lock , to asure no more than one cpu is touching buddy_allocator
-
 
 extern char end[]; // linker will provide this with last mem location of kernel code
 
-static inline long rindex_to_vindex(long rindex) {
-    return rindex<<2;
-}
+// static inline long rindex_to_vindex(long rindex) {
+//     return rindex<<2;
+// }
 
 static inline long vindex_to_rindex(long vindex) {
     return vindex>>2;
@@ -61,15 +60,15 @@ static inline long go_right(long vindex) {
 static inline uint8 get_state(long vindex) {
     long rindex = vindex_to_rindex(vindex);
     uint8 shift = (vindex%4) << 1;
-    uint8 state  = tree[rindex];
+    uint8 state  = mem_tree.tree[rindex];
     return (state >>shift) & 0x3;
 }
 
 static inline void set_state(long vindex, uint8 state) {
     long rindex = vindex_to_rindex(vindex);
     uint8 shift = (vindex%4) << 1;
-    tree[rindex] &= ~(0x3<<shift);
-    tree[rindex] |=  (state & 0x3)<<shift;
+    mem_tree.tree[rindex] &= ~(0x3<<shift);
+    mem_tree.tree[rindex] |=  (state & 0x3)<<shift;
 }
 
 static inline long get_level(long vindex) {
@@ -85,7 +84,7 @@ static inline long go_up(long vindex) {
 }
 
 static inline void *get_adr(long vindex) {
-    if (vindex == 0) return 0;
+    if (vindex == 0) panic("vindex problem in get_adr");
     long level = get_level(vindex);
     long mask = 1ULL << level;
     long offset = vindex ^ mask;  // removing leading 1 , used as delimiter
@@ -103,10 +102,10 @@ static inline uint8 is_brother_full(long vindex,long (*mover)(long)) {
     if (get_state(mover(vindex))==SLOT_FULL)return 1;
     return 0;
 }
-static inline uint8 is_brother_split(long vindex,long(*mover)(long)) {
-    if (get_state(mover(vindex))==SLOT_SPLIT)return 1;
-    return 0;
-}
+// static inline uint8 is_brother_split(long vindex,long(*mover)(long)) {
+//     if (get_state(mover(vindex))==SLOT_SPLIT)return 1;
+//     return 0;
+// }
 
 static inline uint8 is_brother_empty(long vindex,long(*mover)(long)) {
     if (get_state(mover(vindex))==SLOT_EMPTY)return 1;
@@ -114,6 +113,8 @@ static inline uint8 is_brother_empty(long vindex,long(*mover)(long)) {
 }
 
 static inline void update_upstairs_alloc(long vindex) {
+
+    //starts at virtual_index that is allocated , goes up and update its parents
     while (vindex !=1) {
         long (*mover)(long) ;
         uint8 state = get_state(vindex);
@@ -130,6 +131,8 @@ static inline void update_upstairs_alloc(long vindex) {
 }
 
 static inline void update_upstairs_free(long vindex) {
+    //starts at last freed virtual_index , goes up and updates its parents
+
     while (vindex !=1) {
         long (*mover)(long);
         if (is_left_son(vindex))mover = go_right;
@@ -164,40 +167,39 @@ static inline uint16 locate_free_block(long* vindex,uint16 level) {
             if (curr_level == level && state == SLOT_EMPTY) {
                 found = 1;
                 break;
+            }else if (curr_level==level) {
+                break;
             }
 
             if (state == SLOT_EMPTY) {
                 virtual_index = go_left(virtual_index);
                 curr_level++;
+
             }else if (state == SLOT_SPLIT) {
                 uint8 ls = get_state(go_left(virtual_index));
                 uint8 rs = get_state(go_right(virtual_index));
                 //need to update this
                 if (ls == SLOT_SPLIT && rs == SLOT_SPLIT) {
-                    if (!stack.push(&stack, virtual_index)) return 0;
+                    if (!push(&stack, virtual_index)) return 0;
+                    // if both sons are split try to go left
                     virtual_index = go_left(virtual_index);
                 } else if (ls == SLOT_EMPTY) {
+                    //prefer to go on empty sides to lower backtracking
                     virtual_index = go_left(virtual_index);
                 } else if (rs == SLOT_EMPTY) {
                     virtual_index = go_right(virtual_index);
-                } else if (ls == SLOT_FULL) {
-
+                } else if (ls == SLOT_FULL && rs == SLOT_SPLIT) {
+                    //no empty slots , go to splited
                     virtual_index = go_right(virtual_index);
-                } else if (rs == SLOT_FULL) {
-
+                } else if (rs == SLOT_FULL && ls == SLOT_SPLIT) {
                     virtual_index = go_left(virtual_index);
-                } else if (ls == SLOT_SPLIT) {
-
-                    virtual_index = go_right(virtual_index);
-                } else {
-                    virtual_index = go_left(virtual_index);
-                }
+                }else break;
                 curr_level++;
             }else break;
         }
-        if (found)break;
-        if (stack.empty(&stack)) break;
-        stack.pop(&stack, &virtual_index);
+        if (found)break; // if found breaks
+        if (empty(&stack)) break; // if there is nothing to go back and check , means there is no enough mem
+        pop(&stack, &virtual_index);
         virtual_index = go_right(virtual_index);
         curr_level = get_level(virtual_index);
     }
@@ -211,39 +213,104 @@ static inline uint16 locate_free_block(long* vindex,uint16 level) {
 
 
 
-void * buddy_kalloc(uint16 order) {
-    if (order>BUDDY_TREE_LEVEL) return 0;
 
+void * buddy_kalloc(uint16 order) {
+
+    if (order>BUDDY_TREE_LEVEL) panic("Order too big");
     uint16 level = BUDDY_TREE_LEVEL - order;
+
+    acquire(&mem_tree.buddy_lock);
 
     long virtual_index = 1;
     uint16 local_level = locate_free_block(&virtual_index,level);
-    if (local_level==0)return 0;
+    if (local_level==0) {
+        release(&mem_tree.buddy_lock);
+        return 0;
+    }
     if (get_state(virtual_index)==SLOT_EMPTY) {
         void* adr = get_adr(virtual_index);
         set_state(virtual_index,SLOT_FULL);
         update_upstairs_alloc(virtual_index);
+        release(&mem_tree.buddy_lock);
         return adr;
     }
+    release(&mem_tree.buddy_lock);
     return 0;
 }
 
 int buddy_kfree(void* adr , uint16 order) {
 
     uint64 addr = (uint64)adr;
-    if (order>BUDDY_TREE_LEVEL || addr > PHYSTOP ||(char*)addr<end) return 0;
+    if (order>BUDDY_TREE_LEVEL || addr > PHYSTOP ||(char*)addr<end) panic("Invalid address");
     uint16 level = BUDDY_TREE_LEVEL - order;
+
+    acquire(&mem_tree.buddy_lock);
 
     long virtual_index = get_vindex(adr,level);
     // see if freeing is valid
-    if (get_state(virtual_index)!=SLOT_FULL) return 0;
+    if (get_state(virtual_index)!=SLOT_FULL) {
+        release(&mem_tree.buddy_lock);
+        return 0;
+    }
+
     set_state(virtual_index,SLOT_EMPTY);
     //update all nodes in tree after this node is freed
     update_upstairs_free(virtual_index);
+    release(&mem_tree.buddy_lock);
     return 1;
 
 }
 
-int binit() {
+
+
+
+int buddy_init() {
     //here i save kernel code from getting runned over
+    initlock(&mem_tree.buddy_lock,"buddy_lock");
+
+    for (int i = 0; i < TREE_SIZE; i++) {
+        mem_tree.tree[i]= ~((uint8)0);
+    }
+
+    // rounding up end to be at full page
+    char* p = (char*)PGROUNDUP((uint64)end);
+
+
+    //freeing 4KB until i free whole memory
+    for(; p + PGSIZE <= (char*)PHYSTOP; p += PGSIZE)
+        buddy_kfree(p,0);
+
+    return 1;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

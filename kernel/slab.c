@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "riscv.h"
 #include "buddy_kalloc.h"
+#include "slab.h"
 
 #define CACHES_ARR_SIZE 13
 
@@ -49,22 +50,22 @@ char*  names[] = {"size-32B","size-64B"
 
 
 
-void kmem_init(void *space, int block_num) {
-
-    binit();
-    uint64 size = 32;
-    for (int i=0; i<CACHES_ARR_SIZE; i++) {
-        small_buffer_caches[i].name=names[i];
-        small_buffer_caches[i].size=size<<i;
-        small_buffer_caches[i].full_slab=0;
-        small_buffer_caches[i].empty_slab=0;
-        small_buffer_caches[i].partial_slab=0;
-        small_buffer_caches[i].ctor=0;
-        small_buffer_caches[i].dtor=0;
-    }
-
-
-}
+ void kmem_init(void *space, int block_num) {}
+//
+//     binit();
+//     uint64 size = 32;
+//     for (int i=0; i<CACHES_ARR_SIZE; i++) {
+//         small_buffer_caches[i].name=names[i];
+//         small_buffer_caches[i].size=size<<i;
+//         small_buffer_caches[i].full_slab=0;
+//         small_buffer_caches[i].empty_slab=0;
+//         small_buffer_caches[i].partial_slab=0;
+//         small_buffer_caches[i].ctor=0;
+//         small_buffer_caches[i].dtor=0;
+//     }
+//
+//
+// }
 
 kmem_cache_t *kmem_cache_create(const char *name, size_t size,
 void (*ctor)(void *),void (*dtor)(void *)) {
