@@ -16,28 +16,33 @@ struct run {
     struct run *next;
 };
 
-struct {
-    struct spinlock lock;
-    struct run *freelist;
-} kmem;
+// struct {
+//     struct spinlock lock;
+//     struct run *freelist;
+// } kmem;
 
-struct slab {
-    struct slab *next;
-    struct slab *prev;
-};
+
 
 struct kmem_cache_s {
     const char* name;
     size_t size;
-
+    uint16 buddy_order;
+    struct spinlock lock; // every cache needs lock , cant let multiple threads use cache in same time
+    
     struct slab* full_slab;
     struct slab* empty_slab;
     struct slab* partial_slab;
     void (*ctor)(void*);
     void (*dtor)(void*);
+
+
+    struct kmem_cache_s *prev;
+    struct kmem_cache_s *next;
+
 };
 
-struct kmem_cache_s small_buffer_caches[CACHES_ARR_SIZE];
+struct kmem_cache_s *caches_head;
+
 char*  names[] = {"size-32B","size-64B"
                 ,"size-128B","size-256B"
                 ,"size-512B","size-1024B"
@@ -50,9 +55,25 @@ char*  names[] = {"size-32B","size-64B"
 
 
 
- void kmem_init(void *space, int block_num) {}
+ void kmem_init(void *space, int block_num) {
+
+     buddy_init();
+     caches_head = (struct kmem_cache_s*)buddy_kalloc(0);
+     caches_head->name = names[0];
+     caches_head->size = 32;
+     caches_head->buddy_order = 0;
+     caches_head->full_slab = 0;
+     caches_head->empty_slab = 0;
+     caches_head->partial_slab = 0;
+     caches_head->ctor=0;
+     caches_head->dtor=0;
+     caches_head->next=0;
+     caches_head->prev=0;
+     // maybe make all small memory caches upfront ??
+
+ }
 //
-//     binit();
+
 //     uint64 size = 32;
 //     for (int i=0; i<CACHES_ARR_SIZE; i++) {
 //         small_buffer_caches[i].name=names[i];
