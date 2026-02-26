@@ -121,7 +121,7 @@ void (*ctor)(void *),void (*dtor)(void *)) {
         size_t cache_size= sizeof(struct kmem_cache_s);
         uint16 order = get_order_from_size(cache_size,&slab_size);
         caches_origin.empty_slabs = slab_init(buddy_kalloc(order),cache_size,slab_size);
-        if (caches_origin.empty_slabs == 0) panic("kmem_cache_create failed");
+        if (caches_origin.empty_slabs == 0) panic("kmem_cache_create failed");// panic if cant alloc cache
     }
 }
 
