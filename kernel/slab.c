@@ -42,6 +42,7 @@ struct slab {
 
 
     struct free* free_list;
+    struct slab* next;
 };
 
 
@@ -66,6 +67,12 @@ struct kmem_cache_s {
 struct kmem_cache_s *caches_head;
 struct kmem_cache_s caches_origin;
 
+void ctor_kmem_cache_t(void*) {
+
+}
+void dtor_kmem_cache_t(void*) {
+
+}
 
  void kmem_init(void *space, int block_num) {
 
@@ -76,8 +83,8 @@ struct kmem_cache_s caches_origin;
      caches_origin.full_slabs=0;
      caches_origin.empty_slabs=0;
      caches_origin.partial_slabs=0;
-     caches_origin.ctor=0;
-     caches_origin.dtor=0;
+     caches_origin.ctor= ctor_kmem_cache_t;
+     caches_origin.dtor= dtor_kmem_cache_t;
      caches_origin.next=0;
      caches_origin.prev=0;
      caches_head = &caches_origin;
@@ -114,19 +121,42 @@ struct slab* slab_init(void* mem,size_t obj_size,uint64 slab_size) { // here i c
  }
 
 
+
 kmem_cache_t *kmem_cache_create(const char *name, size_t size,// size of object in cache
 void (*ctor)(void *),void (*dtor)(void *)) {
-    if (caches_origin.partial_slabs == 0 && caches_origin.empty_slabs == 0) {
-        uint64 slab_size;
-        size_t cache_size= sizeof(struct kmem_cache_s);
-        uint16 order = get_order_from_size(cache_size,&slab_size);
-        caches_origin.empty_slabs = slab_init(buddy_kalloc(order),cache_size,slab_size);
-        if (caches_origin.empty_slabs == 0) panic("kmem_cache_create failed");// panic if cant alloc cache
-    }
+    kmem_cache_t *cache =(kmem_cache_t*)kmem_cache_alloc(&caches_origin);
+    return cache;
 }
 
 int kmem_cache_shrink(kmem_cache_t *cachep){}
-void *kmem_cache_alloc(kmem_cache_t *cachep){}
+
+void *kmem_cache_alloc(kmem_cache_t *cachep) {
+
+     acquire(&cachep->lock);
+     if (cachep == 0)return 0;
+     struct slab* slab;
+     if (cachep->partial_slabs==0 && cachep->empty_slabs==0) {
+         // if there is no slabs at all allocate new slab
+         uint64 slab_size;
+         uint16 order = get_order_from_size(cachep->size,&slab_size);
+         slab = slab_init(buddy_kalloc(order),cachep->size,slab_size);
+         if (slab == 0) {// panic if cant alloc cache
+            release(&cachep->lock);
+            panic("kmem_cache_create failed");
+         }
+
+     }else if (cachep->partial_slabs!=0) {
+         // if there is , pick one from partial slabs
+         slab = cachep->partial_slabs;
+     }else {
+         slab = cachep->empty_slabs;
+     }
+     //here i found slab and i need to alocate mem from it
+
+    if (cachep->ctor != 0)//cachep->ctor(); // i need to allocate space from slab and to provide ctor with it
+
+     release(&cachep->lock);
+ }
 void kmem_cache_free(kmem_cache_t *cachep, void *objp){}
 void *kmalloc(size_t size) // used to allocate space wia size-N caches
 {
