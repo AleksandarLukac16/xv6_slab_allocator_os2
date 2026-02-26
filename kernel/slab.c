@@ -102,7 +102,7 @@ struct slab* slab_init(void* mem,size_t obj_size,uint64 slab_size) { // here i c
      struct free* prev = slab->free_list;
      struct free* temp = (struct free*)((uint64)slab->free_list+obj_size);
      prev ->next =0;
-     while ((uint64)temp+obj_size <= (uint64)slab+slab_size) {
+     while ((uint64)temp+obj_size <= (uint64)slab+slab_size) { // populating free list
          prev -> next = temp;
          prev = temp;
          prev->next = 0;
