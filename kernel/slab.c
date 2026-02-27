@@ -24,44 +24,39 @@ struct run {
     struct run *next;
 };
 
-// struct {
-//     struct spinlock lock;
-//     struct run *freelist;
-// } kmem;
-
 struct free {
     struct free *next;
 };
 
 struct slab {
-    size_t total;
-    size_t free_count;
+    size_t total; // how much objects can slab store
+    size_t free_count; // free slots counter
 
-    struct free *free_list;
-    struct slab *next;
+    struct free *free_list; // list of free slots in slab
+    struct slab *next; // next slab
 };
 
 
 struct kmem_cache_s {
-    const char *name;
-    size_t size;
+    const char *name; // cache name
+    size_t size;// size of objects that are beeing cached
     //uint16 buddy_order;
     struct spinlock lock; // every cache needs lock , cant let multiple threads use cache in same time
 
-    struct slab *full_slabs;
-    struct slab *empty_slabs;
-    struct slab *partial_slabs;
+    struct slab *full_slabs; // list of full slabs
+    struct slab *empty_slabs;// list of empty slabs
+    struct slab *partial_slabs;// list of slabs that has one or more allocation
 
-    void (*ctor)(void *);
+    void (*ctor)(void *); // object constructor
 
-    void (*dtor)(void *);
+    void (*dtor)(void *); // object destructor
 
     struct kmem_cache_s *prev;
     struct kmem_cache_s *next;
 };
 
-struct kmem_cache_s *caches_head;
-struct kmem_cache_s caches_origin;
+struct kmem_cache_s *caches_head; // head of list of caches
+struct kmem_cache_s caches_origin; // origin of all caches , this cache allocate other caches
 
 
 void kmem_init(void *space, int block_num) {
@@ -107,6 +102,7 @@ struct slab *slab_init(void *mem, size_t obj_size, uint64 slab_size) {
     }
 
     slab->total = (slab_size - sizeof(struct slab)) / obj_size;
+    slab->free_count = slab->total;
     return slab;
 }
 
@@ -122,36 +118,64 @@ void *slab_alloc(struct slab *slab) {
 }
 
 void move_slab(struct slab **from_list, struct slab **to_list, struct slab *slab) {
-    struct slab *temp = *from_list;
-    struct slab *prev = *from_list;
-    while (temp != slab) {
-        prev = temp;
-        temp = temp->next;
+    if (*from_list == 0) panic("provided null as source list ");
+
+    if (*from_list == slab) {
+        *from_list  = slab->next;
+    }else {
+        struct slab* prev = *from_list;
+        while (prev!=0 && prev != slab) {
+            prev = prev ->next;
+        }
+        if (prev == 0 || prev->next != slab) panic("Wrong list provided!");
+        prev->next = slab->next;
     }
-    if (temp != slab) panic("Wrong list provided!");
-    // here i need to remove from from_list and wire to to_list
+    slab->next = *to_list;
+    *to_list = slab;
+
 }
 
 kmem_cache_t *kmem_cache_create(const char *name, size_t size, // size of object in cache
                                 void (*ctor)(void *), void (*dtor)(void *)) {
-    acquire(&caches_origin.lock);
     kmem_cache_t *cache = (kmem_cache_t *) kmem_cache_alloc(&caches_origin);
+
+    acquire(&caches_origin.lock);
     cache->name = name;
     initlock(&cache->lock, name);
     cache->ctor = ctor;
     cache->dtor = dtor;
     cache->size = size;
-    cache->next = 0;
     cache->prev = 0;
     cache->full_slabs = 0;
     cache->empty_slabs = 0;
     cache->partial_slabs = 0;
-    // need to add insert in list of caches
+
+    cache->next = caches_head;
+    caches_head->prev = cache;
+    caches_head = cache;
     release(&caches_origin.lock);
     return cache;
 }
 
+void free_slab(struct slab* slab,size_t obj_size) {
+    // here i need to calculate size and to provide buddy with address that it needs to free
+    size_t slab_size;
+    uint16 order = get_order_from_size(obj_size, &slab_size);
+    if (!buddy_kfree(slab,order))panic("free_slab failed");
+}
+
+
+
 int kmem_cache_shrink(kmem_cache_t *cachep) {
+    // here i return memory that free list holds ,back to buddy allocator
+    acquire(&cachep->lock);
+    while (cachep->empty_slabs != 0) {
+        struct slab* slab_to_free = cachep->empty_slabs;
+        cachep->empty_slabs = cachep->empty_slabs->next;
+        free_slab(slab_to_free,cachep->size);
+    }
+    release(&cachep->lock);
+    return 1;
 }
 
 void *kmem_cache_alloc(kmem_cache_t *cachep) {
@@ -166,18 +190,29 @@ void *kmem_cache_alloc(kmem_cache_t *cachep) {
         uint16 order = get_order_from_size(cachep->size, &slab_size);
         slab = slab_init(buddy_kalloc(order), cachep->size, slab_size);
         if (slab == 0) {
-            // panic if cant alloc cache
+            // panic if cant alloc memory from buddy
             release(&cachep->lock);
             panic("kmem_cache_create failed");
+        }
+        obj = slab_alloc(slab);// dilema here , do i allocate always 8 and more slots ?
+        if (obj!=0) {
+            slab->next = cachep->partial_slabs;
+            cachep->partial_slabs = slab;
         }
     } else if (cachep->partial_slabs != 0) {
         // if there is , pick one from partial slabs
         slab = cachep->partial_slabs;
         obj = slab_alloc(slab);
-        if (slab->free_count == 0) {
+        if (obj!=0 && slab->free_count == 0) {
+            move_slab(&cachep->partial_slabs,&cachep->full_slabs,slab);
         }
     } else {
+        // no partial slabs , need to get mem from free_slabs
         slab = cachep->empty_slabs;
+        obj = slab_alloc(slab);
+        if (obj!=0) {
+            move_slab(&cachep->empty_slabs,&cachep->partial_slabs,slab);
+        }
     }
     //here i found slab and i need to alocate mem from it
 
@@ -185,9 +220,11 @@ void *kmem_cache_alloc(kmem_cache_t *cachep) {
     // i need to allocate space from slab and to provide ctor with it
 
     release(&cachep->lock);
+    return obj;
 }
 
 void kmem_cache_free(kmem_cache_t *cachep, void *objp) {
+
 }
 
 void *kmalloc(size_t size) // used to allocate space wia size-N caches

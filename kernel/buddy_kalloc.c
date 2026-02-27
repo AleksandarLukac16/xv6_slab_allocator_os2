@@ -211,9 +211,6 @@ static inline uint16 locate_free_block(long* vindex,uint16 level) {
 
 }
 
-
-
-
 void * buddy_kalloc(uint16 order) {
 
     if (order>BUDDY_TREE_LEVEL) panic("Order too big");
@@ -260,9 +257,6 @@ int buddy_kfree(void* adr , uint16 order) {
     return 1;
 
 }
-
-
-
 
 int buddy_init() {
     //here i save kernel code from getting runned over
