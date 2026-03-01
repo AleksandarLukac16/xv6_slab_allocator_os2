@@ -9,6 +9,7 @@
 
 #define SMALL_MEM_BUFF_CNT 13
 #define OBJS_IN_SLAB 8
+#define MAX_SMALL_MEM_BUFF 131072
 
 const char *names[] = {
     "size-32B", "size-64B", "size-128B", "size-256B", "size-512B", "size-1024B", "size-2048B", "size-4096B",
@@ -39,13 +40,13 @@ struct slab {
 
 struct kmem_cache_s {
     const char *name; // cache name
-    size_t size;// size of objects that are beeing cached
+    size_t size; // size of objects that are beeing cached
     //uint16 buddy_order;
     struct spinlock lock; // every cache needs lock , cant let multiple threads use cache in same time
 
     struct slab *full_slabs; // list of full slabs
-    struct slab *empty_slabs;// list of empty slabs
-    struct slab *partial_slabs;// list of slabs that has one or more allocation
+    struct slab *empty_slabs; // list of empty slabs
+    struct slab *partial_slabs; // list of slabs that has one or more allocation
 
     void (*ctor)(void *); // object constructor
 
@@ -57,7 +58,8 @@ struct kmem_cache_s {
 
 struct kmem_cache_s *caches_head; // head of list of caches
 struct kmem_cache_s caches_origin; // origin of all caches , this cache allocate other caches
-
+struct kmem_cache_s* small_mem_caches[SMALL_MEM_BUFF_CNT];
+struct spinlock raw_caches_lock;
 
 void kmem_init(void *space, int block_num) {
     buddy_init();
@@ -71,6 +73,8 @@ void kmem_init(void *space, int block_num) {
     caches_origin.dtor = 0;
     caches_origin.next = 0;
     caches_origin.prev = 0;
+    for (int i =0;i<SMALL_MEM_BUFF_CNT;i++)small_mem_caches[i]=0;
+    initlock(&raw_caches_lock, "raw-caches-lock");
     caches_head = &caches_origin;
 }
 
@@ -121,18 +125,17 @@ void move_slab(struct slab **from_list, struct slab **to_list, struct slab *slab
     if (*from_list == 0) panic("provided null as source list ");
 
     if (*from_list == slab) {
-        *from_list  = slab->next;
-    }else {
-        struct slab* prev = *from_list;
-        while (prev!=0 && prev != slab) {
-            prev = prev ->next;
+        *from_list = slab->next;
+    } else {
+        struct slab *prev = *from_list;
+        while (prev != 0 && prev != slab) {
+            prev = prev->next;
         }
         if (prev == 0 || prev->next != slab) panic("Wrong list provided!");
         prev->next = slab->next;
     }
     slab->next = *to_list;
     *to_list = slab;
-
 }
 
 kmem_cache_t *kmem_cache_create(const char *name, size_t size, // size of object in cache
@@ -157,22 +160,22 @@ kmem_cache_t *kmem_cache_create(const char *name, size_t size, // size of object
     return cache;
 }
 
-void free_slab(struct slab* slab,size_t obj_size) {
+int free_slab(struct slab *slab, size_t obj_size) {
     // here i need to calculate size and to provide buddy with address that it needs to free
     size_t slab_size;
     uint16 order = get_order_from_size(obj_size, &slab_size);
-    if (!buddy_kfree(slab,order))panic("free_slab failed");
+    if (!buddy_kfree(slab, order))return 0;
+    return 1;
 }
-
 
 
 int kmem_cache_shrink(kmem_cache_t *cachep) {
     // here i return memory that free list holds ,back to buddy allocator
     acquire(&cachep->lock);
     while (cachep->empty_slabs != 0) {
-        struct slab* slab_to_free = cachep->empty_slabs;
+        struct slab *slab_to_free = cachep->empty_slabs;
         cachep->empty_slabs = cachep->empty_slabs->next;
-        free_slab(slab_to_free,cachep->size);
+        if (!free_slab(slab_to_free, cachep->size))return 0;
     }
     release(&cachep->lock);
     return 1;
@@ -194,8 +197,8 @@ void *kmem_cache_alloc(kmem_cache_t *cachep) {
             release(&cachep->lock);
             panic("kmem_cache_create failed");
         }
-        obj = slab_alloc(slab);// dilema here , do i allocate always 8 and more slots ?
-        if (obj!=0) {
+        obj = slab_alloc(slab); // dilema here , do i allocate always 8 and more slots ?
+        if (obj != 0) {
             slab->next = cachep->partial_slabs;
             cachep->partial_slabs = slab;
         }
@@ -203,15 +206,15 @@ void *kmem_cache_alloc(kmem_cache_t *cachep) {
         // if there is , pick one from partial slabs
         slab = cachep->partial_slabs;
         obj = slab_alloc(slab);
-        if (obj!=0 && slab->free_count == 0) {
-            move_slab(&cachep->partial_slabs,&cachep->full_slabs,slab);
+        if (obj != 0 && slab->free_count == 0) {
+            move_slab(&cachep->partial_slabs, &cachep->full_slabs, slab);
         }
     } else {
         // no partial slabs , need to get mem from free_slabs
         slab = cachep->empty_slabs;
         obj = slab_alloc(slab);
-        if (obj!=0) {
-            move_slab(&cachep->empty_slabs,&cachep->partial_slabs,slab);
+        if (obj != 0) {
+            move_slab(&cachep->empty_slabs, &cachep->partial_slabs, slab);
         }
     }
     //here i found slab and i need to alocate mem from it
@@ -223,17 +226,93 @@ void *kmem_cache_alloc(kmem_cache_t *cachep) {
     return obj;
 }
 
-void kmem_cache_free(kmem_cache_t *cachep, void *objp) {
+int find_obj(struct slab *slab, void *obj, size_t obj_size, struct slab **target_slab) {
+    if (obj == 0|| slab ==0)return 0;
+    while (slab) {
+        uint64 start = (uint64) &slab[1];
+        uint64 end_of_slab = start + obj_size * slab->total;
+        uint64 target = (uint64) obj;
 
+        if (target < end_of_slab && target >= start && (target - start) % obj_size == 0) {
+            //condition (target-start)%obj_size insures that my obj starts at end of obj in front of it ,
+            //it is not in middle of some obj
+            *target_slab = slab;
+            return 1;
+        }
+
+        slab = slab->next;
+    }
+    *target_slab = 0;
+    return 0;
+}
+
+void slab_free(struct slab *slab, void *obj) {
+    struct free *free_obj = (struct free *) obj;
+    free_obj->next = slab->free_list;
+    slab->free_list = free_obj;
+    slab->free_count++;
+}
+
+void kmem_cache_free(kmem_cache_t *cachep, void *objp) {
+    //Here i call destructor on object and , move slabs to their new place
+    if (objp == 0)return;
+    acquire(&cachep->lock);
+    struct slab *target_slab;
+    if (find_obj(cachep->partial_slabs, objp, cachep->size, &target_slab)) {
+        if (cachep->dtor != 0)cachep->dtor(objp);
+        slab_free(target_slab, objp);
+        if (target_slab->free_count == target_slab->total) {
+            move_slab(&cachep->partial_slabs, &cachep->empty_slabs, target_slab);
+        }
+        release(&cachep->lock);
+        return;
+    }else if (find_obj(cachep->full_slabs, objp, cachep->size, &target_slab)) {
+        if (cachep->dtor != 0)cachep->dtor(objp);
+        slab_free(target_slab, objp);
+        move_slab(&cachep->full_slabs, &cachep->partial_slabs, target_slab);
+        release(&cachep->lock);
+        return;
+    }
+    release(&cachep->lock);
+}
+
+int size_to_index(size_t size) {
+    if (size <= 32)return 0;
+    // round up: 33→64, 65→128
+    int bits = 64 - __builtin_clzll(size - 1);
+    return bits - 5;  // 5 because 2^5 = 32 is index 0
 }
 
 void *kmalloc(size_t size) // used to allocate space wia size-N caches
 {
     //pages larger than largest small-mem-cache is delegated directly to buddy
+    if (size >MAX_SMALL_MEM_BUFF) {
+        uint16 order =0;
+        size_t block = BLOCK_SIZE;
+        while (block<size) {
+            block <<= 1;
+            order++;
+        }
+        return buddy_kalloc(order);
+    }
+    int index = size_to_index(size);
+    acquire(&raw_caches_lock);
+    struct kmem_cache_s* cache = small_mem_caches[index];
+    if (cache == 0) {
+        // alloc new cache with this size and put it to array
+        small_mem_caches[index] = kmem_cache_create(names[index],sizes[index],0,0);
+        cache = small_mem_caches[index];
+    }
+    release(&raw_caches_lock);
+    if (cache == 0) panic ("kmalloc: cant allocate cache");
+    return kmem_cache_alloc(cache);
+
 }
 
 //change name after i remove old allocator from use
 void s_kfree(const void *objp) {
+    if (objp == 0)return; //
+
 }
 
 void kmem_cache_destroy(kmem_cache_t *cachep) {
