@@ -1,8 +1,8 @@
 #include "buddy_kalloc.h"
-#include "defs.h"
 #include "memlayout.h"
-#include "riscv.h"
 #include "spinlock.h"
+#include "riscv.h"
+ #include "defs.h"
 
 
 struct{
@@ -47,6 +47,19 @@ extern char end[]; // linker will provide this with last mem location of kernel 
 //     return rindex<<2;
 // }
 
+
+static int my_clz(unsigned long x) {
+    if (x == 0) return 64;
+    int n = 0;
+    if (x <= 0x00000000FFFFFFFF) { n += 32; x <<= 32; }
+    if (x <= 0x0000FFFFFFFFFFFF) { n += 16; x <<= 16; }
+    if (x <= 0x00FFFFFFFFFFFFFF) { n +=  8; x <<=  8; }
+    if (x <= 0x0FFFFFFFFFFFFFFF) { n +=  4; x <<=  4; }
+    if (x <= 0x3FFFFFFFFFFFFFFF) { n +=  2; x <<=  2; }
+    if (x <= 0x7FFFFFFFFFFFFFFF) { n +=  1; }
+    return n;
+}
+
 static inline long vindex_to_rindex(long vindex) {
     return vindex>>2;
 }
@@ -72,7 +85,7 @@ static inline void set_state(long vindex, uint8 state) {
 }
 
 static inline long get_level(long vindex) {
-    return 63 - __builtin_clzll(vindex); // this function deletes leading zeros
+    return 63 - my_clz(vindex); // this function deletes leading zeros
 }
 
 static inline uint8 is_left_son(long vindex) {

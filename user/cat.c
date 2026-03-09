@@ -25,7 +25,6 @@ int
 main(int argc, char *argv[])
 {
   int fd, i;
-8
   if(argc <= 1){
     cat(0);
     exit(0);
