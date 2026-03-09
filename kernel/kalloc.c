@@ -57,7 +57,7 @@ kfree(void *pa)
   // r->next = kmem.freelist;
   // kmem.freelist = r;
   // release(&kmem.lock);
-  buddy_kfree(pa,1);
+  buddy_kfree(pa,0);
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -77,5 +77,5 @@ kalloc(void)
   // if(r)
   //   memset((char*)r, 5, PGSIZE); // fill with junk
   // return (void*)r;
-  return buddy_kalloc(1);
+  return buddy_kalloc(0);
 }

@@ -1,5 +1,5 @@
 #include "types.h"
-#define BUDDY_TREE_LEVEL 14
+#define BUDDY_TREE_LEVEL 15
 #define SLOT_EMPTY 0
 #define SLOT_SPLIT 1
 #define SLOT_FULL 3 //must be 3
