@@ -12,3 +12,5 @@ void *buddy_kalloc(uint16 order);
 int buddy_kfree(void *adr,uint16 order);
 
 int buddy_init();
+
+int my_clz(uint64 x);

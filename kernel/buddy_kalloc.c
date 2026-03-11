@@ -48,7 +48,7 @@ extern char end[]; // linker will provide this with last mem location of kernel 
 // }
 
 
-static int my_clz(unsigned long x) {
+int my_clz(uint64 x) {
     if (x == 0) return 64;
     int n = 0;
     if (x <= 0x00000000FFFFFFFF) { n += 32; x <<= 32; }
