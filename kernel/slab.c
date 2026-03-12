@@ -308,7 +308,7 @@ void kmem_cache_free(kmem_cache_t *cachep, void *objp) {
     }
     struct slab *target_slab;
     if (find_obj(cachep->partial_slabs, objp, cachep->size, &target_slab)) {
-        if (cachep->dtor != 0)cachep->dtor(objp);
+        //if (cachep->dtor != 0)cachep->dtor(objp);
         slab_free(target_slab, objp);
         guard->magic_num = FREE_MAGIC_NUM;
         if (target_slab->free_count == target_slab->total) {
@@ -317,7 +317,7 @@ void kmem_cache_free(kmem_cache_t *cachep, void *objp) {
         release(&cachep->lock);
         return;
     }else if (find_obj(cachep->full_slabs, objp, cachep->size, &target_slab)) {
-        if (cachep->dtor != 0)cachep->dtor(objp);
+        //if (cachep->dtor != 0)cachep->dtor(objp);
         slab_free(target_slab, objp);
         guard->magic_num = FREE_MAGIC_NUM;
         move_slab(&cachep->full_slabs, &cachep->partial_slabs, target_slab);
