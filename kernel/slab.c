@@ -1,9 +1,10 @@
-#include "defs.h"
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
-#include "spinlock.h"
 #include "riscv.h"
+#include "spinlock.h"
+#include "proc.h"
+#include "defs.h"
 #include "buddy_kalloc.h"
 #include "slab.h"
 
@@ -23,12 +24,11 @@ extern char end[]; // first address after kernel.
 // defined by kernel.ld.
 
 
-struct free_guard {
-    int magic_num;
-};
+
 
 struct free {
     struct free *next;
+    int magic_num;
 };
 
 struct slab {
@@ -78,7 +78,7 @@ void cache_dtor(void* c) {
 
 
 void kmem_init(void *space, int block_num) {
-    buddy_init();
+    //buddy_init();
     caches_origin.name = "caches-origin";
     caches_origin.size = sizeof(struct kmem_cache_s);
     initlock(&caches_origin.lock, "caches-origin-lock");
@@ -89,6 +89,7 @@ void kmem_init(void *space, int block_num) {
     caches_origin.dtor = cache_dtor;
     caches_origin.next = 0;
     caches_origin.prev = 0;
+    caches_origin.error_msg = 0;
     for (int i =0;i<SMALL_MEM_BUFF_CNT;i++)small_mem_caches[i]=0;
     initlock(&raw_caches_lock, "raw-caches-lock");
     caches_head = &caches_origin;
@@ -172,7 +173,7 @@ kmem_cache_t *kmem_cache_create(const char *name, size_t size, // size of object
 
     acquire(&caches_origin.lock);
     cache->name = name;
-    initlock(&cache->lock, name);
+    initlock(&cache->lock, (char*)name);
     cache->ctor = ctor;
     cache->dtor = dtor;
     cache->size = size;
@@ -180,6 +181,7 @@ kmem_cache_t *kmem_cache_create(const char *name, size_t size, // size of object
     cache->full_slabs = 0;
     cache->empty_slabs = 0;
     cache->partial_slabs = 0;
+    cache->error_msg = 0;
 
     cache->next = caches_head;
     caches_head->prev = cache;
@@ -256,7 +258,7 @@ void *kmem_cache_alloc(kmem_cache_t *cachep) {
     }
     //here i found slab and i need to alocate mem from it
     if (obj!=0) {
-        struct free_guard* guard = (struct free_guard*) obj;
+        struct free* guard = (struct free*) obj;
         guard->magic_num = 0;
     }
     if (cachep->ctor != 0 && obj != 0)cachep->ctor(obj);
@@ -286,7 +288,7 @@ int find_obj(struct slab *slab, const void *obj, size_t obj_size, struct slab **
     return 0;
 }
 
-void slab_free(struct slab *slab, void *obj) {
+void slab_free(struct slab *slab, const void *obj) {
     struct free *free_obj = (struct free *) obj;
     free_obj->next = slab->free_list;
     slab->free_list = free_obj;
@@ -298,7 +300,7 @@ void kmem_cache_free(kmem_cache_t *cachep, void *objp) {
     if (objp == 0)return;
 
     acquire(&cachep->lock);
-    struct free_guard* guard = (struct free_guard*) objp;
+    struct free* guard = (struct free*) objp;
     if (guard->magic_num == FREE_MAGIC_NUM) {
         cachep->error_msg = "Double free!!!";
         release(&cachep->lock);
@@ -362,7 +364,7 @@ void *kmalloc(size_t size) // used to allocate space wia size-N caches
 //change name after i remove old allocator from use
 void s_kfree(const void *objp) {
     if (objp == 0)return;
-    struct free_guard* guard = (struct free_guard *) objp;
+    struct free* guard = (struct free *) objp;
     if (guard->magic_num==FREE_MAGIC_NUM) return;
     for (int i =0;i<SMALL_MEM_BUFF_CNT;i++) {
         struct kmem_cache_s* cache = small_mem_caches[i];
@@ -370,8 +372,8 @@ void s_kfree(const void *objp) {
         if (cache == 0) continue;
         acquire(&cache->lock);
         if (find_obj(cache->partial_slabs, objp, cache->size, &slab)) {
-            guard->magic_num=FREE_MAGIC_NUM;
             slab_free(slab, objp);
+            guard->magic_num=FREE_MAGIC_NUM;
             if (slab->free_count == slab->total) {
                 move_slab(&cache->partial_slabs, &cache->empty_slabs, slab);
             }
@@ -379,6 +381,7 @@ void s_kfree(const void *objp) {
             return;
         }else if (find_obj(cache->full_slabs, objp, cache->size, &slab)) {
             slab_free(slab, objp);
+            guard->magic_num=FREE_MAGIC_NUM;
             if (slab->free_count == slab->total) {
                 move_slab(&cache->full_slabs, &cache->empty_slabs, slab);
             }else {
@@ -454,7 +457,7 @@ void kmem_cache_info(kmem_cache_t *cachep) {
     int percentage = total_objs > 0 ? (used_objs * 100) / total_objs : 0;
 
     printf("cache: %s\n", cachep->name);
-    printf("  obj size: %d | slab size: %d\n", cachep->size, slab_size);
+    printf("  obj size: %lu | slab size: %lu\n", cachep->size, slab_size);
     printf("  slabs: %d | objs: %d/%d | usage: %d%%\n",
            total_slabs, used_objs, total_objs, percentage);
 
@@ -462,5 +465,10 @@ void kmem_cache_info(kmem_cache_t *cachep) {
 }
 
 int kmem_cache_error(kmem_cache_t *cachep) {
-    printf("kmem_cache_error: %s\n",cachep->error_msg);
+    if (cachep->error_msg != 0) {
+        printf("cache %s: %s\n", cachep->name, cachep->error_msg);
+        cachep->error_msg = 0;
+        return 1;
+    }
+    return 0;
 }
