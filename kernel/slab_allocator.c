@@ -470,6 +470,7 @@ int cache_error(struct cache_t *cachep) {
         printf("cache %s: %s\n", cachep->name, cachep->error_msg);
         cachep->error_msg = 0;
         return 1;
+
     }
     return 0;
 }
