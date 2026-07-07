@@ -6,7 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 #include "buddy_kalloc.h"
-#include "slab.h"
+#include "slab_allocator.h"
 
 #define SMALL_MEM_BUFF_CNT 13
 #define OBJS_IN_SLAB 8
@@ -41,7 +41,8 @@ struct slab {
 
 
 
-struct kmem_cache_s {
+struct cache_t {
+    uint64 id;
     const char *name; // cache name
     const char *error_msg;
     size_t size; // size of objects that are beeing cached
@@ -56,13 +57,13 @@ struct kmem_cache_s {
 
     void (*dtor)(void *); // object destructor
 
-    struct kmem_cache_s *prev;
-    struct kmem_cache_s *next;
+    struct cache_t *prev;
+    struct cache_t *next;
 };
 
-struct kmem_cache_s *caches_head; // head of list of caches
-struct kmem_cache_s caches_origin; // origin of all caches , this cache allocate other caches
-struct kmem_cache_s* small_mem_caches[SMALL_MEM_BUFF_CNT];
+struct cache_t *caches_head; // head of list of caches
+struct cache_t caches_origin; // origin of all caches , this cache allocate other caches
+struct cache_t* small_mem_caches[SMALL_MEM_BUFF_CNT];
 struct spinlock raw_caches_lock;
 
 int free_slab_list(struct slab**sl_list,size_t obj_size);
@@ -70,17 +71,17 @@ int free_slab_list(struct slab**sl_list,size_t obj_size);
 void cache_dtor(void* c) {
     // here i write destructor for caches and than i can destroy them in
     if (c == 0)return;
-    struct kmem_cache_s* cache = (struct kmem_cache_s*)c;
+    struct cache_t* cache = (struct cache_t*)c;
     free_slab_list(&cache->full_slabs, cache->size);
     free_slab_list(&cache->empty_slabs, cache->size);
     free_slab_list(&cache->partial_slabs, cache->size);
 }
 
 
-void kmem_init(void *space, int block_num) {
+void cache_init(void *space, int block_num) {
     //buddy_init();
     caches_origin.name = "caches-origin";
-    caches_origin.size = sizeof(struct kmem_cache_s);
+    caches_origin.size = sizeof(struct cache_t);
     initlock(&caches_origin.lock, "caches-origin-lock");
     caches_origin.full_slabs = 0;
     caches_origin.empty_slabs = 0;
@@ -167,9 +168,9 @@ void move_slab(struct slab **from_list, struct slab **to_list, struct slab *slab
     *to_list = slab;
 }
 
-kmem_cache_t *kmem_cache_create(const char *name, size_t size, // size of object in cache
+uint64 cache_create(const char *name, size_t size, // size of object in cache
                                 void (*ctor)(void *), void (*dtor)(void *)) {
-    kmem_cache_t *cache = (kmem_cache_t *) kmem_cache_alloc(&caches_origin);
+    struct cache_t *cache = (struct cache_t*) cache_alloc(&caches_origin);
 
     acquire(&caches_origin.lock);
     cache->name = name;
@@ -187,7 +188,7 @@ kmem_cache_t *kmem_cache_create(const char *name, size_t size, // size of object
     caches_head->prev = cache;
     caches_head = cache;
     release(&caches_origin.lock);
-    return cache;
+    return cache->id;
 }
 
 int free_slab(struct slab *slab, size_t obj_size) {
@@ -208,7 +209,7 @@ int free_slab_list(struct slab**sl_list,size_t obj_size) {
     return freed_blocks;
 }
 
-int kmem_cache_shrink(kmem_cache_t *cachep) {
+int cache_shrink(struct cache_t *cachep) {
     // here i return memory that free list holds ,back to buddy allocator
     acquire(&cachep->lock);
     if (!cachep->empty_slabs) {
@@ -220,7 +221,7 @@ int kmem_cache_shrink(kmem_cache_t *cachep) {
     return released_blocks;
 }
 
-void *kmem_cache_alloc(kmem_cache_t *cachep) {
+void *cache_alloc(struct cache_t *cachep) {
     if (cachep == 0)return 0;
     acquire(&cachep->lock);
 
@@ -295,7 +296,7 @@ void slab_free(struct slab *slab, const void *obj) {
     slab->free_count++;
 }
 
-void kmem_cache_free(kmem_cache_t *cachep, void *objp) {
+void cache_free(struct cache_t *cachep, void *objp) {
     //Here i call destructor on object and , move slabs to their new place
     if (objp == 0)return;
 
@@ -335,7 +336,7 @@ int size_to_index(size_t size) {
     return bits - 5;  // 5 because 2^5 = 32 is index 0
 }
 
-void *kmalloc(size_t size) // used to allocate space wia size-N caches
+void *cache_kalloc(size_t size) // used to allocate space wia size-N caches
 {
     //pages larger than largest small-mem-cache is delegated directly to buddy
     if (size >MAX_SMALL_MEM_BUFF) {
@@ -349,25 +350,25 @@ void *kmalloc(size_t size) // used to allocate space wia size-N caches
     }
     int index = size_to_index(size);
     acquire(&raw_caches_lock);
-    struct kmem_cache_s* cache = small_mem_caches[index];
+    struct cache_t* cache = small_mem_caches[index];
     if (cache == 0) {
         // alloc new cache with this size and put it to array
-        small_mem_caches[index] = kmem_cache_create(names[index],sizes[index],0,0);
+        small_mem_caches[index] = cache_create(names[index],sizes[index],0,0);
         cache = small_mem_caches[index];
     }
     release(&raw_caches_lock);
     if (cache == 0) panic ("kmalloc: cant allocate cache");
-    return kmem_cache_alloc(cache);
+    return cache_alloc(cache);
 
 }
 
 //change name after i remove old allocator from use
-void s_kfree(const void *objp) {
+void cache_kfree(const void *objp) {
     if (objp == 0)return;
     struct free* guard = (struct free *) objp;
     if (guard->magic_num==FREE_MAGIC_NUM) return;
     for (int i =0;i<SMALL_MEM_BUFF_CNT;i++) {
-        struct kmem_cache_s* cache = small_mem_caches[i];
+        struct cache_t* cache = small_mem_caches[i];
         struct slab* slab;
         if (cache == 0) continue;
         acquire(&cache->lock);
@@ -394,7 +395,7 @@ void s_kfree(const void *objp) {
     }
 }
 
-void kmem_cache_destroy(kmem_cache_t *cachep) {
+void cache_destroy(struct cache_t *cachep) {
     if (cachep == 0)return;
     acquire(&cachep->lock);
 
@@ -414,12 +415,12 @@ void kmem_cache_destroy(kmem_cache_t *cachep) {
     if (cachep->next) cachep->next->prev = cachep->prev;
     if (cachep->prev) cachep->prev->next = cachep->next;
     release(&caches_origin.lock);
-    kmem_cache_free(&caches_origin, cachep);
+    cache_free(&caches_origin, cachep);
     // here i call kmem_cache_free of origin cache
 
 }
 
-void kmem_cache_info(kmem_cache_t *cachep) {
+void cache_info(struct cache_t *cachep) {
     if (cachep == 0) return;
     acquire(&cachep->lock);
 
@@ -464,7 +465,7 @@ void kmem_cache_info(kmem_cache_t *cachep) {
     release(&cachep->lock);
 }
 
-int kmem_cache_error(kmem_cache_t *cachep) {
+int cache_error(struct cache_t *cachep) {
     if (cachep->error_msg != 0) {
         printf("cache %s: %s\n", cachep->name, cachep->error_msg);
         cachep->error_msg = 0;

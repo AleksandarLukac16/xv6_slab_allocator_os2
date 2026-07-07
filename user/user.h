@@ -24,16 +24,7 @@ int getpid(void);
 char* sys_sbrk(int,int);
 int pause(int);
 int uptime(void);
-int    kmem_init(int,int);
-int    kmem_cache_create(const char*, int, int, int);
-uint64 kmem_cache_alloc(int,uint64);
-int    kmem_cache_free(int, uint64);
-int    kmem_cache_destroy(int);
-int    kmem_cache_info(int);
-uint64 kmalloc(int,uint64);
-int    kfree(uint64,int);
-// int    slab_write(uint64, int, int);
-// int    slab_check(uint64, int, int);
+
 
 // ulib.c
 int stat(const char*, struct stat*);
