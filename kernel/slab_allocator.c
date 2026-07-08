@@ -1,12 +1,7 @@
 #include "types.h"
-#include "param.h"
-#include "memlayout.h"
-#include "riscv.h"
 #include "spinlock.h"
-#include "proc.h"
 #include "defs.h"
 #include "buddy_kalloc.h"
-#include "slab_allocator.h"
 
 #define SMALL_MEM_BUFF_CNT 13
 #define OBJS_IN_SLAB 8
