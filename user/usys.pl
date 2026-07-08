@@ -43,3 +43,14 @@ entry("sbrk");
 entry("pause");
 entry("uptime");
 
+#my syscalls
+entry("cache_init");
+entry("cache_create");
+entry("cache_shrink");
+entry("cache_alloc");
+entry("cache_free");
+entry("cache_kalloc");
+entry("cache_kfree");
+entry("cache_destroy");
+entry("cache_info");
+entry("cache_error");
