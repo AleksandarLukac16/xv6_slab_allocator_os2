@@ -168,7 +168,7 @@ void move_slab(struct slab **from_list, struct slab **to_list, struct slab *slab
     *to_list = slab;
 }
 
-uint64 cache_create(const char *name, size_t size, // size of object in cache
+struct cache_t* cache_create(const char *name, size_t size, // size of object in cache
                                 void (*ctor)(void *), void (*dtor)(void *)) {
     struct cache_t *cache = (struct cache_t*) cache_alloc(&caches_origin);
 
@@ -188,7 +188,7 @@ uint64 cache_create(const char *name, size_t size, // size of object in cache
     caches_head->prev = cache;
     caches_head = cache;
     release(&caches_origin.lock);
-    return cache->id;
+    return cache;
 }
 
 int free_slab(struct slab *slab, size_t obj_size) {
@@ -235,7 +235,7 @@ void *cache_alloc(struct cache_t *cachep) {
         if (slab == 0) {
             // panic if cant alloc memory from buddy
             release(&cachep->lock);
-            panic("kmem_cache_create failed");
+            panic("cache_create failed");
         }
         obj = slab_alloc(slab); // dilema here , do i allocate always 8 and more slots ?
         if (obj != 0) {
@@ -357,7 +357,7 @@ void *cache_kalloc(size_t size) // used to allocate space wia size-N caches
         cache = small_mem_caches[index];
     }
     release(&raw_caches_lock);
-    if (cache == 0) panic ("kmalloc: cant allocate cache");
+    if (cache == 0) panic ("cache_kalloc: cant allocate cache");
     return cache_alloc(cache);
 
 }
@@ -473,4 +473,24 @@ int cache_error(struct cache_t *cachep) {
 
     }
     return 0;
+}
+
+struct cache_t * id_to_cache(uint64 id) {
+    struct cache_t* temp = caches_head;
+    while (temp) {
+        if (temp->id == id) {
+            return temp;
+        }
+        temp = temp->next;
+    }
+    for (int i =0;i<SMALL_MEM_BUFF_CNT;i++) {
+        if (small_mem_caches[i]->id ==id) {
+            return small_mem_caches[i];
+        }
+    }
+    return 0;
+}
+
+uint64 cache_to_id(struct cache_t *cache) {
+    return cache->id;
 }
