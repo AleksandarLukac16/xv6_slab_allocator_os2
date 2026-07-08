@@ -54,3 +54,4 @@ entry("cache_kfree");
 entry("cache_destroy");
 entry("cache_info");
 entry("cache_error");
+
