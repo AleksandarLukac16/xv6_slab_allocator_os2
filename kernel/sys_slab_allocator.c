@@ -58,6 +58,7 @@ uint64 sys_cache_alloc(void) {
     p->sz +=PGROUNDUP(cache->size);
     return old_size;
 
+
 }
 uint64 sys_cache_free(void);
 uint64 sys_cache_kalloc(void);
