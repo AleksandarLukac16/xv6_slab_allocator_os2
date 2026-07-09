@@ -44,14 +44,14 @@ entry("pause");
 entry("uptime");
 
 #my syscalls
-entry("cache_init");
-entry("cache_create");
-entry("cache_shrink");
-entry("cache_alloc");
-entry("cache_free");
-entry("cache_kalloc");
-entry("cache_kfree");
-entry("cache_destroy");
-entry("cache_info");
-entry("cache_error");
+entry("kmem_init");
+entry("kmem_cache_create");
+entry("kmem_cache_shrink");
+entry("kmem_cache_alloc");
+entry("kmem_cache_free");
+entry("kmalloc");
+entry("kfree");
+entry("kmem_cache_destroy");
+entry("kmem_cache_info");
+entry("kmem_cache_error");
 

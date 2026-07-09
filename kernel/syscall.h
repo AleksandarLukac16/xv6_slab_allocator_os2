@@ -22,15 +22,15 @@
 #define SYS_close  21
 
 //slab_allocator
-#define SYS_cache_init 22
-#define SYS_cache_create 23
-#define SYS_cache_shrink 24
-#define SYS_cache_alloc 25
-#define SYS_cache_free 26
-#define SYS_cache_kalloc 27
-#define SYS_cache_kfree 28
-#define SYS_cache_destroy 29
-#define SYS_cache_info 30
-#define SYS_cache_error 31
+#define SYS_kmem_init 22
+#define SYS_kmem_cache_create 23
+#define SYS_kmem_cache_shrink 24
+#define SYS_kmem_cache_alloc 25
+#define SYS_kmem_cache_free 26
+#define SYS_kmalloc 27
+#define SYS_kfree 28
+#define SYS_kmem_cache_destroy 29
+#define SYS_kmem_cache_info 30
+#define SYS_kmem_cache_error 31
 
 

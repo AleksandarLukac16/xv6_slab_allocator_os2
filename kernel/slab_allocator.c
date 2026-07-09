@@ -7,6 +7,7 @@
 #define OBJS_IN_SLAB 8
 #define MAX_SMALL_MEM_BUFF 131072
 #define FREE_MAGIC_NUM 0xDEAD
+#define MAX_CACHE_NAME 30
 
 const char *names[] = {
     "size-32B", "size-64B", "size-128B", "size-256B", "size-512B", "size-1024B", "size-2048B", "size-4096B",
@@ -36,26 +37,6 @@ struct slab {
 
 
 
-struct cache_t {
-    uint64 id;
-    const char *name; // cache name
-    const char *error_msg;
-    size_t size; // size of objects that are beeing cached
-    //uint16 buddy_order;
-    struct spinlock lock; // every cache needs lock , cant let multiple threads use cache in same time
-
-    struct slab *full_slabs; // list of full slabs
-    struct slab *empty_slabs; // list of empty slabs
-    struct slab *partial_slabs; // list of slabs that has one or more allocation
-
-    void (*ctor)(void *); // object constructor
-
-    void (*dtor)(void *); // object destructor
-
-    struct cache_t *prev;
-    struct cache_t *next;
-};
-
 struct cache_t *caches_head; // head of list of caches
 struct cache_t caches_origin; // origin of all caches , this cache allocate other caches
 struct cache_t* small_mem_caches[SMALL_MEM_BUFF_CNT];
@@ -73,7 +54,7 @@ void cache_dtor(void* c) {
 }
 
 
-void cache_init(void *space, int block_num) {
+void cache_init() {
     //buddy_init();
     caches_origin.name = "caches-origin";
     caches_origin.size = sizeof(struct cache_t);

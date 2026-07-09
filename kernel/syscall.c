@@ -138,16 +138,16 @@ static uint64 (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
-[SYS_cache_init] sys_cache_init,
-  [SYS_cache_create] sys_cache_create,
- [SYS_cache_shrink] sys_cache_shrink,
- [SYS_cache_alloc] sys_cache_alloc,
- [SYS_cache_free] sys_cache_free,
- [SYS_cache_kalloc] sys_cache_kalloc,
- [SYS_cache_kfree] sys_cache_kfree,
- [SYS_cache_destroy] sys_cache_destroy,
- [SYS_cache_info] sys_cache_info,
- [SYS_cache_error] sys_cache_error
+[SYS_kmem_init] sys_cache_init,
+  [SYS_kmem_cache_create] sys_cache_create,
+ [SYS_kmem_cache_shrink] sys_cache_shrink,
+ [SYS_kmem_cache_alloc] sys_cache_alloc,
+ [SYS_kmem_cache_free] sys_cache_free,
+ [SYS_kmalloc] sys_cache_kalloc,
+ [SYS_kfree] sys_cache_kfree,
+ [SYS_kmem_cache_destroy] sys_cache_destroy,
+ [SYS_kmem_cache_info] sys_cache_info,
+ [SYS_kmem_cache_error] sys_cache_error
 
 };
 
