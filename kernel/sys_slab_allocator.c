@@ -60,9 +60,63 @@ uint64 sys_cache_alloc(void) {
 
 
 }
-uint64 sys_cache_free(void);
-uint64 sys_cache_kalloc(void);
-uint64 sys_cache_kfree(void);
-uint64 sys_cache_destroy(void);
-uint64 sys_cache_info(void);
-uint64 sys_cache_error(void);
+uint64 sys_cache_free(void) {
+    uint64 cache_id;
+    uint64 ptr;
+    argaddr(0,&cache_id);
+    argaddr(1,&ptr);
+    struct cache_t* cache = id_to_cache(cache_id);
+    if (cache == 0) {
+        return -1;
+    }
+    struct proc *p = myproc();
+    uint64 to_free_va;
+    uint64 pa = walkaddr(p->pagetable, to_free_va);
+    if (pa == 0) {
+        return -1;
+    }
+    uint64 npages = PGROUNDUP(cache->size) / PGSIZE;
+    uvmunmap(p->pagetable, to_free_va, npages, 0);
+    cache_free(cache, (void*)pa);
+
+}
+uint64 sys_cache_kalloc(void) {
+    uint64 size;
+    argaddr(0,&size);
+    return (uint64)cache_kalloc(size);
+}
+uint64 sys_cache_kfree(void) {
+    uint64 ptr;
+    argaddr(0,&ptr);
+    kfree((void*)ptr);
+    return 0;
+}
+uint64 sys_cache_destroy(void) {
+    uint64 cache_id;
+    argaddr(0,&cache_id);
+    struct cache_t* cache = id_to_cache(cache_id);
+    if (cache == 0) {
+        return -1;
+    }
+    cache_destroy(cache);
+    return 0;
+}
+uint64 sys_cache_info(void) {
+    uint64 cache_id;
+    argaddr(0,&cache_id);
+    struct cache_t* cache = id_to_cache(cache_id);
+    if (cache == 0) {
+        return -1;
+    }
+    cache_info(cache);
+    return 0;
+}
+uint64 sys_cache_error(void) {
+    uint64 cache_id;
+    argaddr(0,&cache_id);
+    struct cache_t* cache = id_to_cache(cache_id);
+    if (cache == 0) {
+        return -1;
+    }
+    return cache_error(cache);
+}

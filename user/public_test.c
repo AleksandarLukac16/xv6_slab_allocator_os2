@@ -9,7 +9,7 @@
 
 struct data_s {
     int id;
-    kmem_cache_t  *shared;
+    kmem_cache_t  shared;
     int iterations;
 };
 
@@ -37,7 +37,7 @@ int check(void *data, size_t size) {
 }
 
 struct objects_s {
-    kmem_cache_t *cache;
+    kmem_cache_t cache;
     void *data;
 };
 
@@ -45,7 +45,7 @@ void work(void* pdata) {
     struct data_s data = *(struct data_s*) pdata;
     int size = 0;
     int object_size = data.id + 1;
-    kmem_cache_t *cache = kmem_cache_create(CACHE_NAMES[data.id], object_size, 0, 0);
+    kmem_cache_t cache = kmem_cache_create(CACHE_NAMES[data.id], object_size, 0, 0);
 
     struct objects_s *objs = (struct objects_s*)(kmalloc(sizeof(struct objects_s) * data.iterations));
 
@@ -94,7 +94,7 @@ void main() {
     int num_of_blocks = 1024;
     void* space = malloc(num_of_blocks * BLOCK_SIZE);
     kmem_init(space, num_of_blocks);
-    kmem_cache_t *shared = kmem_cache_create("shared object", shared_size, construct, 0);
+    kmem_cache_t shared = kmem_cache_create("shared object", shared_size, construct, 0);
 
     struct data_s data;
     data.shared = shared;
