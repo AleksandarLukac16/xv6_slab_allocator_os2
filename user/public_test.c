@@ -1,4 +1,6 @@
-#include "user.h"
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
 
 
 #define RUN_NUM (5)

@@ -30,7 +30,8 @@ OBJS = \
   $K/plic.o \
   $K/virtio_disk.o\
   $K/buddy_kalloc.o\
-  $K/slab_allocator.o
+  $K/slab_allocator.o\
+  $K/sys_slab_allocator.o
 
 # riscv64-unknown-elf- or riscv64-linux-gnu-
 # perhaps in /opt/riscv/bin

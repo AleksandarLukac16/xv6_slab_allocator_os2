@@ -2,23 +2,27 @@
 #include "riscv.h"
 #include "defs.h"
 #include "param.h"
-#include "memlayout.h"
-#include "spinlock.h"
+#include "slab_allocator.h"
 #include "proc.h"
 #include "vm.h"
-#include "../user/user.h"
+
+
 
 
 uint64 sys_cache_init(void) {
     cache_init();
+    return 0;
 
 }
 uint64 sys_cache_create(void) {
-    char* name;
+    char name[30];
     size_t size;
     uint64 ctor;
     uint64 dtor;
-    int len = argstr(0,name,30);
+    int len = argstr(0,name,sizeof(name));
+    if (len == -1) {
+        return -1;
+    }
     argaddr(1,&size);
     argaddr(2,&ctor);
     argaddr(3,&dtor);
@@ -51,7 +55,7 @@ uint64 sys_cache_alloc(void) {
     uint64 new_space = PGROUNDUP(cache->size);
 
     int perm = PTE_R | PTE_W | PTE_U;
-    int ret = mappages(p->pagetable,old,new_space,mem,perm);
+    int ret = mappages(p->pagetable,old_size,new_space,(uint64)mem,perm);
     if (ret < 0) {
         return -1;
     }
@@ -70,14 +74,14 @@ uint64 sys_cache_free(void) {
         return -1;
     }
     struct proc *p = myproc();
-    uint64 to_free_va;
-    uint64 pa = walkaddr(p->pagetable, to_free_va);
+    uint64 pa = walkaddr(p->pagetable, ptr);
     if (pa == 0) {
         return -1;
     }
     uint64 npages = PGROUNDUP(cache->size) / PGSIZE;
-    uvmunmap(p->pagetable, to_free_va, npages, 0);
+    uvmunmap(p->pagetable, ptr, npages, 0);
     cache_free(cache, (void*)pa);
+    return 0;
 
 }
 uint64 sys_cache_kalloc(void) {
@@ -88,7 +92,7 @@ uint64 sys_cache_kalloc(void) {
 uint64 sys_cache_kfree(void) {
     uint64 ptr;
     argaddr(0,&ptr);
-    kfree((void*)ptr);
+    cache_kfree((void*)ptr);
     return 0;
 }
 uint64 sys_cache_destroy(void) {

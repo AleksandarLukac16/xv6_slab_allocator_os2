@@ -1,8 +1,7 @@
-#include "defs.h"
 #include "slab_allocator.h"
+#include "riscv.h"
+#include "defs.h"
 #include "buddy_kalloc.h"
-#include "spinlock.h"
-
 
 
 #define SMALL_MEM_BUFF_CNT 13
@@ -20,27 +19,6 @@ const size_t sizes[] = {32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32
 
 extern char end[]; // first address after kernel.
 // defined by kernel.ld.
-
-struct cache_t {
-    uint64 id;
-    const char *name; // cache name
-    const char *error_msg;
-    size_t size; // size of objects that are beeing cached
-    //uint16 buddy_order;
-    struct spinlock lock; // every cache needs lock , cant let multiple threads use cache in same time
-
-    struct slab *full_slabs; // list of full slabs
-    struct slab *empty_slabs; // list of empty slabs
-    struct slab *partial_slabs; // list of slabs that has one or more allocation
-
-    void (*ctor)(void *); // object constructor
-
-    void (*dtor)(void *); // object destructor
-
-    struct cache_t *prev;
-    struct cache_t *next;
-};
-
 
 
 struct free {
@@ -73,6 +51,7 @@ void cache_dtor(void* c) {
     free_slab_list(&cache->empty_slabs, cache->size);
     free_slab_list(&cache->partial_slabs, cache->size);
 }
+
 
 
 void cache_init() {
